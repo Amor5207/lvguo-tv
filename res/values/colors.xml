@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 短剧电视端：深色底 + 暖珊瑚强调色 -->
+    <color name="bg">#0B0E11</color>
+    <color name="surface">#171D23</color>
+    <color name="surface_hi">#242D36</color>
+    <color name="primary">#C5ED8A</color>
+    <color name="text">#F5F7F8</color>
+    <color name="text_dim">#94A1AD</color>
+    <color name="line">#34404D</color>
+</resources>

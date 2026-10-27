@@ -1,0 +1,62 @@
+# Android / Gradle build output
+.gradle/
+**/build/
+/out/
+/output/
+*.apk
+*.aab
+*.apks
+*.dex
+*.class
+*.idsig
+.cxx/
+.externalNativeBuild/
+captures/
+
+# Local SDK paths and signing material (never publish signing keys)
+local.properties
+keystore.properties
+signing.properties
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+
+# IDE / OS files
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Python / automation / local working files
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.playwright-cli/
+playwright-report/
+test-results/
+.codex/
+*.log
+*.tmp
+*.bak
+*.orig
+*~
+/null/
+/PowerShell 7.6.7/
+/design/requirements-audit-*.md
+
+# Keep source assets, libs/*.jar, dependency notices and docs/screenshots tracked.
+# Downloadable APKs belong in GitHub Releases, not in the source repository.
+
+# Local build configuration and credentials
+build.local.json
+github_token.txt
