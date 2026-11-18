@@ -109,9 +109,14 @@ a{color:inherit;text-decoration:none}
 .login .qr .veil.on{opacity:1;pointer-events:auto}
 .login .hint{min-height:22px;font-weight:600}
 .login .hint.ok{color:var(--primary-text)}
-.login .qr-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:26px;margin-top:4px}
+.login .qr-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:28px;margin-top:6px}
 .login .count{font-size:12.5px;color:var(--text-3)}
-.login .qr-refresh{flex:none;padding:4px 0;color:var(--text-2);font-size:12.5px;transition:color .2s}
-.login .qr-refresh:hover:not(:disabled){color:var(--primary-text)}
-.login .qr-refresh:disabled{cursor:wait}
+.login .qr-refresh{flex:none;display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 12px;border-radius:999px;background:var(--fill-2);box-shadow:var(--ring);color:var(--text-2);font-size:12.5px;font-weight:500;transition:background .18s,color .18s,box-shadow .18s,transform .15s}
+.login .qr-refresh .icon{font-size:13px;transition:transform .35s var(--ease)}
+.login .qr-refresh:hover:not(:disabled){background:var(--primary-soft);box-shadow:inset 0 0 0 1px var(--primary);color:var(--primary-text)}
+.login .qr-refresh:hover:not(:disabled) .icon{transform:rotate(90deg)}
+.login .qr-refresh:active:not(:disabled){transform:scale(.96)}
+.login .qr-refresh:disabled{cursor:wait;opacity:.55}
+.login .qr-refresh:disabled .icon{animation:qrSpin .85s linear infinite}
+@keyframes qrSpin{to{transform:rotate(360deg)}}
 

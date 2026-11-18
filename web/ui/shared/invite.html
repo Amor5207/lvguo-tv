@@ -107,9 +107,13 @@ h1 em{font-style:normal;color:var(--pri)}
 .qr .mask.on{display:grid}
 .qr .mask svg{width:32px;height:32px;color:#15803d;margin:0 auto 6px}
 .qr .mask button{margin-top:8px;height:32px;padding:0 14px;border:0;border-radius:8px;background:#15803d;color:#fff;font-size:13px}
-.qr-refresh{padding:2px 6px;color:var(--sub);font-size:12.5px;transition:color .18s}
-.qr-refresh:hover:not(:disabled){color:var(--text)}
-.qr-refresh:disabled{cursor:wait;opacity:.45}
+.qr-refresh{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 14px;border:1px solid var(--line);border-radius:999px;background:var(--box);color:var(--sub);font-size:13px;font-weight:500;transition:background .18s,border-color .18s,color .18s,transform .15s}
+.qr-refresh svg{width:14px;height:14px;flex:none;transition:transform .35s cubic-bezier(.22,1,.36,1)}
+.qr-refresh:hover:not(:disabled){background:var(--bg);border-color:var(--ink);color:var(--ink)}
+.qr-refresh:hover:not(:disabled) svg{transform:rotate(90deg)}
+.qr-refresh:active:not(:disabled){transform:scale(.96)}
+.qr-refresh:disabled{cursor:wait;opacity:.55}
+.qr-refresh:disabled svg{animation:spin .85s linear infinite}
 .qsteps{display:grid;gap:12px;font-size:14px;color:var(--sub)}
 .qsteps div{display:flex;gap:10px;align-items:baseline}
 .qsteps b{flex:none;width:16px;color:var(--faint);font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
@@ -178,7 +182,7 @@ h1 em{font-style:normal;color:var(--pri)}
       <div id="pane-qr">
       <a class="btn openapp" id="openapp" href="#">打开红果 App 登录</a>
       <div class="qrw">
-        <div class="qrset"><div class="qr"><div class="qr-skeleton" id="qr-skeleton" role="status" aria-label="正在生成二维码"><svg viewBox="0 0 160 160" aria-hidden="true"><path fill-rule="evenodd" d="M12 12h42v42H12zM19 19v28h28V19zM106 12h42v42h-42zM113 19v28h28V19zM12 106h42v42H12zM19 113v28h28v-28z"/><path d="M26 26h14v14H26zM120 26h14v14h-14zM26 120h14v14H26zM66 12h8v8h-8zM80 12h8v8h-8zM66 26h8v8h-8zM80 40h8v8h-8zM66 54h8v8h-8zM94 54h8v8h-8zM66 68h8v8h-8zM80 68h8v8h-8zM94 68h8v8h-8zM108 68h8v8h-8zM122 68h8v8h-8zM136 68h8v8h-8zM66 82h8v8h-8zM94 82h8v8h-8zM122 82h8v8h-8zM66 96h8v8h-8zM80 96h8v8h-8zM94 96h8v8h-8zM108 96h8v8h-8zM136 96h8v8h-8zM66 110h8v8h-8zM80 124h8v8h-8zM94 110h8v8h-8zM108 124h8v8h-8zM122 110h8v8h-8zM136 124h8v8h-8zM66 138h8v8h-8zM94 138h8v8h-8zM108 138h8v8h-8zM136 138h8v8h-8z"/></svg></div><img id="qr" alt="" hidden><div class="mask" id="qr-mask"></div></div><button type="button" class="qr-refresh" id="qr-refresh" aria-label="刷新二维码">刷新二维码</button></div>
+        <div class="qrset"><div class="qr"><div class="qr-skeleton" id="qr-skeleton" role="status" aria-label="正在生成二维码"><svg viewBox="0 0 160 160" aria-hidden="true"><path fill-rule="evenodd" d="M12 12h42v42H12zM19 19v28h28V19zM106 12h42v42h-42zM113 19v28h28V19zM12 106h42v42H12zM19 113v28h28v-28z"/><path d="M26 26h14v14H26zM120 26h14v14h-14zM26 120h14v14H26zM66 12h8v8h-8zM80 12h8v8h-8zM66 26h8v8h-8zM80 40h8v8h-8zM66 54h8v8h-8zM94 54h8v8h-8zM66 68h8v8h-8zM80 68h8v8h-8zM94 68h8v8h-8zM108 68h8v8h-8zM122 68h8v8h-8zM136 68h8v8h-8zM66 82h8v8h-8zM94 82h8v8h-8zM122 82h8v8h-8zM66 96h8v8h-8zM80 96h8v8h-8zM94 96h8v8h-8zM108 96h8v8h-8zM136 96h8v8h-8zM66 110h8v8h-8zM80 124h8v8h-8zM94 110h8v8h-8zM108 124h8v8h-8zM122 110h8v8h-8zM136 124h8v8h-8zM66 138h8v8h-8zM94 138h8v8h-8zM108 138h8v8h-8zM136 138h8v8h-8z"/></svg></div><img id="qr" alt="" hidden><div class="mask" id="qr-mask"></div></div><button type="button" class="qr-refresh" id="qr-refresh" aria-label="刷新二维码"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 5v5h-5M4 19v-5h5"/><path d="M5.6 9A7.5 7.5 0 0 1 19 10M18.4 15A7.5 7.5 0 0 1 5 14"/></svg><span>刷新二维码</span></button></div>
         <div class="qsteps"><div><b>1</b><span>打开红果 App</span></div><div><b>2</b><span>「我的」页右上角扫一扫</span></div><div><b>3</b><span>在手机上确认登录</span></div></div>
         <p class="qalt">也可用另一台手机扫码</p>
       </div>
