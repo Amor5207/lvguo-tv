@@ -231,7 +231,8 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w -
 
 ## 致谢
 
-感谢开源项目 [aston314/hongguo-tv](https://github.com/aston314/hongguo-tv) 提供的请求签名与登录流程参考。
+- 感谢开源项目 [aston314/hongguo-tv](https://github.com/aston314/hongguo-tv) 提供的请求签名与手机号登录实现参考。
+- 感谢开源项目 [N3urda/hongguoTV](https://github.com/N3urda/hongguoTV) 提供的播放 V5 签名实现参考。
 
 其余第三方组件、依赖及开源许可证归属见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 [third_party/](third_party/)。
 
