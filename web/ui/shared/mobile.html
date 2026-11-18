@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f2f2f7">
+<title>绿果WEB · 请在电脑上打开</title>
+<link rel="icon" type="image/png" href="/shared/favicon.png">
+<style>
+:root{color-scheme:light dark;--bg:#f2f2f7;--card:#fff;--text:#1c1c1e;--sub:#6e6e73;--faint:#8e8e93;--pri:#2db35a;--pri-soft:rgba(45,179,90,.12);--ink:#fff;--fill:rgba(118,118,128,.12)}
+@media (prefers-color-scheme:dark){:root{--bg:#0b0f0d;--card:#171c1a;--text:#f5f7f6;--sub:#a1a8a5;--faint:#7c8481;--pri:#3ccb6a;--pri-soft:rgba(60,203,106,.16);--ink:#06200f;--fill:rgba(255,255,255,.08)}}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{min-height:100dvh;display:grid;place-items:center;padding:max(24px,env(safe-area-inset-top)) 20px max(24px,env(safe-area-inset-bottom));background:radial-gradient(120% 60% at 50% 0%,var(--pri-soft),transparent 70%),var(--bg);color:var(--text);font:16px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+.card{width:100%;max-width:380px;padding:8px 8px 10px;text-align:center;animation:up .7s cubic-bezier(.22,1,.36,1) both}
+@keyframes up{from{opacity:0;transform:translateY(20px) scale(.98)}}
+.logo{width:68px;height:68px;border-radius:18px;box-shadow:0 8px 20px rgba(45,179,90,.25)}
+h1{margin-top:16px;font-size:23px;font-weight:800;letter-spacing:-.01em}
+.lead{margin-top:8px;color:var(--sub);font-size:15px}
+.pc{display:flex;justify-content:center;margin:24px 0 6px}
+.pc svg{width:118px;height:auto;color:var(--pri)}
+.url{display:flex;align-items:center;gap:10px;margin-top:18px;padding:12px 12px 12px 16px;border-radius:16px;background:var(--fill)}
+.url span{flex:1;min-width:0;text-align:left;font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.url button{flex:none;height:36px;padding:0 16px;border:0;border-radius:99px;background:var(--pri);color:var(--ink);font:inherit;font-size:14px;font-weight:700;cursor:pointer;transition:transform .25s cubic-bezier(.34,1.56,.64,1)}
+.url button:active{transform:scale(.94)}
+.steps{margin-top:22px;text-align:left;display:grid;gap:12px}
+.steps div{display:flex;gap:12px;align-items:flex-start;font-size:14.5px;color:var(--sub)}
+.steps b{flex:none;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--pri-soft);color:var(--pri);font-size:13px}
+small{display:block;margin-top:22px;color:var(--faint);font-size:12px}
+</style>
+</head>
+<body>
+<main class="card">
+  <img class="logo" src="/shared/logo.png" alt="绿果WEB">
+  <h1>请在电脑上打开</h1>
+  <p class="lead">网页版为电脑设计，手机暂不提供</p>
+  <div class="pc" aria-hidden="true"><svg viewBox="0 0 120 84" fill="none"><rect x="10" y="4" width="100" height="62" rx="8" stroke="currentColor" stroke-width="4"/><rect x="18" y="12" width="84" height="46" rx="4" fill="currentColor" opacity=".14"/><path d="M48 30l16 9-16 9z" fill="currentColor"/><path d="M40 80h40M60 66v14" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg></div>
+  <div class="url"><span id="u"></span><button id="c" type="button">复制网址</button></div>
+  <div class="steps">
+    <div><b>1</b><span>复制上面的网址，发到电脑上</span></div>
+    <div><b>2</b><span>用电脑浏览器打开</span></div>
+    <div><b>3</b><span>输入邀请码，或登录已绑定的红果账号</span></div>
+  </div>
+  <small>家里有电视或投影仪？也可以安装「绿果TV」电视版</small>
+</main>
+<script>
+var url=location.origin+'/';document.getElementById('u').textContent=url.replace(/^https?:\/\//,'').replace(/\/$/,'');
+document.getElementById('c').onclick=function(){var b=this;function ok(){b.textContent='已复制';setTimeout(function(){b.textContent='复制网址'},1600)}
+function fb(){var t=document.createElement('textarea');t.value=url;t.style.position='fixed';t.style.opacity='0';document.body.appendChild(t);t.select();try{document.execCommand('copy');ok()}catch(e){}t.remove()}
+if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(url).then(ok,fb);else fb();};
+</script>
+</body>
+</html>

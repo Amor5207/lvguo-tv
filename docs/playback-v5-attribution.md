@@ -1,0 +1,1 @@
+The mobile playback v5 signing implementation and its test vectors are adapted from [N3urda/hongguoTV](https://github.com/N3urda/hongguoTV), commit `18c37c2`, under GPL-3.0-only. The existing signing implementation remains separate.

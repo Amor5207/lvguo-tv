@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>绿果WEB · 管理后台</title>
+<link rel="icon" type="image/png" href="/shared/favicon.png">
+<script>try{var m=JSON.parse(localStorage.getItem('lvguo.settings')||'{}').theme||'auto';var d=m==='dark'||(m==='auto'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.setAttribute('data-theme',d?'dark':'light')}catch(e){}</script>
+<style>
+/* 管理后台：与主站同一套简约风格——纯净底色、墨色按钮、发丝线表格，不用卡片与阴影 */
+:root{--bg:#fff;--text:#0c0c0d;--sub:#4b4b4f;--faint:#8b8b90;--line:rgba(0,0,0,.09);--fill:rgba(0,0,0,.05);--hover:rgba(0,0,0,.03);--ink:#0c0c0d;--ink-on:#fff;--ok:#15803d;--warn:#a16207;--blue:#1d4ed8;--danger:#dc2626;--panel:#fff;--shadow:0 16px 48px rgba(0,0,0,.14);color-scheme:light}
+:root[data-theme=dark]{--bg:#0a0a0b;--text:#f4f4f5;--sub:#b5b5ba;--faint:#7c7c82;--line:rgba(255,255,255,.1);--fill:rgba(255,255,255,.08);--hover:rgba(255,255,255,.04);--ink:#f4f4f5;--ink-on:#0a0a0b;--ok:#4ade80;--warn:#eab308;--blue:#60a5fa;--danger:#f87171;--panel:#161617;--shadow:0 16px 48px rgba(0,0,0,.6);color-scheme:dark}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.55 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+a{color:inherit;text-decoration:none}
+.top{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:10px;height:64px;padding:0 max(24px,calc((100vw - 1120px) / 2));background:var(--bg);border-bottom:1px solid var(--line)}
+.top img{width:28px;height:28px;border-radius:7px}
+.top b{font-size:17px;font-weight:700}
+.top b span{color:var(--ok)}
+.top i{font-style:normal;color:var(--faint);font-size:14px;margin-left:2px}
+.top .sp{flex:1}
+.top .back{height:34px;padding:0 12px;display:inline-flex;align-items:center;border-radius:8px;font-size:14px;color:var(--sub)}
+.top .back:hover{background:var(--fill);color:var(--text)}
+main{max-width:1120px;margin:0 auto;padding:40px 24px 80px}
+.head{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.head h1{font-size:30px;line-height:1.15;font-weight:700;letter-spacing:-.02em}
+.head .sum{margin-top:8px;color:var(--faint);font-size:14px;font-variant-numeric:tabular-nums}
+.head .sum b{color:var(--text);font-weight:600}
+.head .sum span+span::before{content:"·";margin:0 10px;color:var(--faint)}
+.head .sp{flex:1}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:38px;padding:0 16px;border-radius:10px;font-weight:600;font-size:14px;white-space:nowrap;box-shadow:inset 0 0 0 1px var(--line);transition:background .15s,opacity .15s}
+.btn:hover{background:var(--hover)}
+.btn.pri{background:var(--ink);color:var(--ink-on);box-shadow:none}
+.btn.pri:hover{background:var(--ink);opacity:.86}
+.btn.danger{background:var(--danger);color:#fff;box-shadow:none}
+.btn svg{width:15px;height:15px}
+.btn[disabled]{opacity:.5;cursor:default}
+.tabs{margin-top:32px;display:flex;gap:26px;border-bottom:1px solid var(--line)}
+.tabs button{position:relative;height:44px;font-size:15px;font-weight:500;color:var(--faint)}
+.tabs button:hover{color:var(--text)}
+.tabs button.on{color:var(--text);font-weight:600}
+.tabs button.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--ink)}
+.tabs sup{margin-left:5px;font-size:12px;font-weight:400;color:var(--faint)}
+.bar{display:flex;align-items:center;gap:16px;padding:16px 0 6px;flex-wrap:wrap}
+.search{display:flex;align-items:center;gap:8px;height:36px;width:280px;max-width:100%;padding:0 12px;border-radius:9px;background:var(--fill)}
+.search svg{width:15px;height:15px;color:var(--faint)}
+.search input{flex:1;min-width:0;border:0;background:none;outline:0;color:var(--text);font:inherit}
+.search input::placeholder{color:var(--faint)}
+.seg{display:inline-flex;gap:2px}
+.seg button{height:32px;padding:0 12px;border-radius:8px;color:var(--faint);font-size:14px}
+.seg button:hover{color:var(--text)}
+.seg button.on{background:var(--fill);color:var(--text);font-weight:600}
+table{width:100%;border-collapse:collapse}
+th{padding:12px 12px 10px 0;text-align:left;font-size:12.5px;font-weight:500;color:var(--faint);border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:14px 12px 14px 0;border-bottom:1px solid var(--line);vertical-align:middle}
+tbody tr:hover td{background:var(--hover)}
+th:last-child,td:last-child{padding-right:0}
+.code{font:600 14px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;cursor:pointer}
+.code:hover{text-decoration:underline;text-underline-offset:3px}
+.you{margin-left:8px;font-size:12px;color:var(--faint)}
+.role{font-size:13px;color:var(--sub)}
+.role.owner{color:var(--warn)}
+.role.admin{color:var(--blue)}
+.muted{color:var(--faint)}
+.hg{font-weight:500}.mono{font:12px ui-monospace,SFMono-Regular,Menlo,monospace}
+.note{max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--sub)}
+.acts{display:flex;justify-content:flex-end;gap:2px;opacity:.35;transition:opacity .15s}
+tr:hover .acts{opacity:1}
+.ib{display:grid;place-items:center;width:30px;height:30px;border-radius:8px;color:var(--sub)}
+.ib:hover{background:var(--fill);color:var(--text)}
+.ib.del:hover{color:var(--danger)}
+.ib svg{width:16px;height:16px}
+.ib[disabled]{opacity:.25;cursor:default;background:none}
+.empty{padding:64px 16px;text-align:center;color:var(--faint)}
+td.empty{border-bottom:0}
+/* 弹层 */
+.mask{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:20px;background:rgba(0,0,0,0);transition:background .18s}
+.mask.on{background:rgba(0,0,0,.4)}
+.dlg{width:min(420px,100%);padding:24px;border-radius:14px;background:var(--panel);box-shadow:inset 0 0 0 1px var(--line),var(--shadow);opacity:0;transform:translateY(6px);transition:opacity .18s,transform .22s cubic-bezier(.22,1,.36,1)}
+.mask.on .dlg{opacity:1;transform:none}
+.dlg h3{font-size:17px;font-weight:700}
+.dlg p{margin-top:6px;color:var(--sub)}
+.fld{margin-top:18px}
+.fld label{display:block;margin-bottom:8px;font-size:12.5px;color:var(--faint)}
+.fld input{width:100%;height:40px;padding:0 12px;border:0;border-radius:9px;background:var(--fill);color:var(--text);font:inherit;outline:0;box-shadow:inset 0 0 0 1px transparent;transition:box-shadow .15s}
+.fld input:focus{box-shadow:inset 0 0 0 1.5px var(--ink)}
+.fld .check{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text)}
+.fld .check input{width:16px;height:16px;accent-color:var(--ok);box-shadow:none}
+.fld select{width:100%;height:40px;padding:0 12px;border:0;border-radius:9px;background:var(--fill);color:var(--text);font:inherit}
+.opts{display:flex;gap:6px;flex-wrap:wrap}
+.opts button{height:34px;padding:0 14px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--line);color:var(--sub);font-size:14px}
+.opts button.on{background:var(--ink);color:var(--ink-on);box-shadow:none;font-weight:600}
+.opts button[disabled]{opacity:.35;cursor:default}
+.dlg .row{margin-top:24px;display:flex;justify-content:flex-end;gap:8px}
+.made{margin-top:16px;display:grid}
+.made div{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line)}
+.made b{font:600 16px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em}
+.toast{position:fixed;left:50%;bottom:28px;z-index:60;transform:translate(-50%,10px);padding:9px 16px;border-radius:9px;background:var(--ink);color:var(--ink-on);font-size:13.5px;opacity:0;transition:.2s;pointer-events:none}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+@media (max-width:900px){main{padding:24px 16px 60px}.hide-m{display:none}.head h1{font-size:24px}}
+</style>
+</head>
+<body>
+<header class="top"><img src="/shared/logo.png" alt=""><b>绿果<span>WEB</span></b><i>管理</i><span class="sp"></span><span class="role" id="me"></span><a class="back" href="/">返回</a></header>
+<main id="main"></main>
+<div class="toast" id="toast"></div>
+<script>
+(function(){
+  var $=function(s,r){return (r||document).querySelector(s)};
+  var ROLE={owner:'超管',admin:'管理员',member:'成员'};
+  var D=null,VIEW=(location.hash.slice(1)||'invites'),Q='',F='all';
+  var I={copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
+    msg:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>',
+    unlink:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 15l6-6M10 6l1-1a5 5 0 0 1 7 7l-1 1M14 18l-1 1a5 5 0 0 1-7-7l1-1"/><path d="M3 3l18 18"/></svg>',
+    trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+    edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg>',
+    userx:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="4"/><path d="M3 21a6 6 0 0 1 12 0M17 8l4 4M21 8l-4 4"/></svg>',
+    chev:'<svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>',
+    plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+    search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>'};
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+  function toast(t){var e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(e._t);e._t=setTimeout(function(){e.classList.remove('on')},1800)}
+  function copy(t,ok){(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){toast(ok||'已复制')},function(){var a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();try{document.execCommand('copy');toast(ok||'已复制')}catch(e){}a.remove()})}
+  function when(s){if(!s)return '—';var d=new Date(s*1000),n=Date.now()/1000-s;if(n<60)return '刚刚';if(n<3600)return Math.floor(n/60)+' 分钟前';if(n<86400)return Math.floor(n/3600)+' 小时前';if(n<86400*7)return Math.floor(n/86400)+' 天前';return (d.getMonth()+1)+'月'+d.getDate()+'日'}
+  function date(s){var d=new Date(s*1000);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+  function api(p,body){return fetch(p,{method:body?'POST':'GET',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||'操作失败');return j})})}
+  function inviteMsg(c){return '绿果WEB 邀请码：'+c+'\n'+location.origin+'\n选择「我有邀请码」并输入邀请码。'}
+  // ---------- 弹层
+  function modal(html,onOpen){
+    var m=document.createElement('div');m.className='mask';m.innerHTML='<div class="dlg">'+html+'</div>';document.body.appendChild(m);
+    requestAnimationFrame(function(){m.classList.add('on')});
+    function close(){m.classList.remove('on');setTimeout(function(){m.remove()},200);document.removeEventListener('keydown',key)}
+    function key(e){if(e.key==='Escape')close()}
+    document.addEventListener('keydown',key);
+    m.addEventListener('mousedown',function(e){if(e.target===m)close()});
+    onOpen&&onOpen($('.dlg',m),close);return close;
+  }
+  function confirmBox(title,text,ok,danger){
+    return new Promise(function(res){modal('<h3>'+esc(title)+'</h3><p>'+esc(text)+'</p><div class="row"><button class="btn" data-c="0">取消</button><button class="btn '+(danger?'danger':'pri')+'" data-c="1">'+esc(ok)+'</button></div>',function(d,close){
+      $('[data-c="0"]',d).focus();
+      d.addEventListener('click',function(e){var b=e.target.closest('[data-c]');if(!b)return;close();res(b.dataset.c==='1')});
+    })});
+  }
+  // ---------- 生成邀请码
+  function createDlg(){
+    var role='member',can=D.canCreate,cnt=1;
+    modal('<h3>生成邀请码</h3>'+
+      '<div class="fld"><label>角色</label><div class="opts" id="r">'+['member','admin','owner'].map(function(r){return '<button data-r="'+r+'"'+(can[r]?'':' disabled')+' class="'+(r===role?'on':'')+'">'+ROLE[r]+'</button>'}).join('')+'</div></div>'+
+      '<div class="fld"><label>数量</label><div class="opts" id="c">'+[1,3,5,10].map(function(n){return '<button data-n="'+n+'" class="'+(n===1?'on':'')+'">'+n+' 个</button>'}).join('')+'</div></div>'+
+      '<div class="fld"><label>自定义邀请码（可选）</label><input id="custom" maxlength="40" placeholder="6 至 32 位字母或数字，留空自动生成"></div>'+
+      '<div class="fld"><label>邀请码类型</label><select id="access"><option value="login">登录并绑定</option><option value="guest">免登录 · 按邀请码保存记录，可绑定</option><option value="browse">仅浏览 · 记录只在本机，不可绑定</option></select></div>'+
+      '<div class="fld"><label>备注</label><input id="nt" maxlength="40" placeholder="可选"></div>'+
+      '<div class="made" id="made"></div><div class="row"><button class="btn" data-x>关闭</button><button class="btn pri" data-go>生成</button></div>',function(d,close){
+      d.addEventListener('click',function(e){
+        var b;
+        if((b=e.target.closest('[data-r]'))&&!b.disabled){role=b.dataset.r;$('#r',d).querySelectorAll('button').forEach(function(x){x.classList.toggle('on',x===b)})}
+        else if(b=e.target.closest('[data-n]')){cnt=+b.dataset.n;$('#c',d).querySelectorAll('button').forEach(function(x){x.classList.toggle('on',x===b)})}
+        else if(e.target.closest('[data-x]'))close();
+        else if(b=e.target.closest('[data-go]')){
+          b.disabled=true;
+          api('/api/invite/new',{role:role,count:$('#custom',d).value.trim()?1:cnt,code:$('#custom',d).value.trim(),guestAllowed:$('#access',d).value==='guest',browseOnly:$('#access',d).value==='browse',note:$('#nt',d).value}).then(function(r){
+            $('#made',d).innerHTML=r.codes.map(function(c){return '<div><b>'+c+'</b><button class="ib" data-cp="'+c+'" title="复制邀请语">'+I.msg+'</button></div>'}).join('');
+            copy(r.codes.length===1?inviteMsg(r.codes[0]):r.codes.join('\n'),r.codes.length===1?'已生成，邀请语已复制':'已生成 '+r.codes.length+' 个，已复制');
+            b.disabled=false;load();
+          }).catch(function(er){toast(er.message);b.disabled=false});
+        }
+        else if(b=e.target.closest('[data-cp]'))copy(inviteMsg(b.dataset.cp),'邀请语已复制');
+      });
+    });
+  }
+  function settingsDlg(){
+    modal('<h3>单码同时在线上限</h3><p>超出上限后同一邀请码的新访客将提示稍后再试；管理员不受限制。</p><div class="fld"><label>每个邀请码最大同时在线人数（0 表示不限制）</label><input id="mo" type="number" min="0" max="10000" value="'+(D.maxOnline||0)+'"></div>'+
+      '<div class="row"><button class="btn" data-x>取消</button><button class="btn pri" data-go>保存</button></div>',function(d,close){
+      $('#mo',d).focus();
+      d.addEventListener('click',function(e){
+        if(e.target.closest('[data-x]'))close();
+        else if(e.target.closest('[data-go]')){
+          var n=parseInt($('#mo',d).value,10);
+          if(!Number.isFinite(n)||n<0)return toast('请输入大于等于 0 的整数');
+          api('/api/invite/settings',{maxOnline:n}).then(function(){close();toast('已保存');load()}).catch(function(er){toast(er.message)});
+        }
+      });
+    });
+  }
+  function editDlg(x){
+    modal('<h3>编辑 '+esc(x.code)+'</h3><div class="fld"><label>备注</label><input id="nt" maxlength="40" value="'+esc(x.note)+'"></div><div class="fld"><label>邀请码类型</label><select id="access"><option value="login" '+(!x.guestAllowed&&!x.browseOnly?'selected':'')+'>登录并绑定</option><option value="guest" '+(x.guestAllowed?'selected':'')+'>免登录 · 按邀请码保存记录，可绑定</option><option value="browse" '+(x.browseOnly?'selected':'')+(x.linked?' disabled':'')+'>仅浏览 · 记录只在本机，不可绑定</option></select></div>'+
+      '<div class="row"><button class="btn" data-x>取消</button><button class="btn pri" data-go>保存</button></div>',function(d,close){
+      $('#nt',d).focus();
+      d.addEventListener('click',function(e){
+        if(e.target.closest('[data-x]'))close();
+        else if(e.target.closest('[data-go]'))api('/api/invite/update',{code:x.code,note:$('#nt',d).value,guestAllowed:$('#access',d).value==='guest',browseOnly:$('#access',d).value==='browse'}).then(function(){close();toast('已保存');load()}).catch(function(er){toast(er.message)});
+      });
+    });
+  }
+  // ---------- 视图
+  var HEAD='<thead><tr><th>邀请码</th><th>角色</th><th>红果账号</th><th class="hide-m">最近访问</th><th class="hide-m">备注</th><th class="hide-m">创建</th><th></th></tr></thead>';
+  function inviteRows(list){
+    if(!list.length)return '<tr><td colspan="7" class="empty">没有符合条件的邀请码</td></tr>';
+    return list.map(function(x){
+      return '<tr><td><span class="code" data-copy="'+x.code+'" title="点击复制">'+x.code+'</span>'+(x.self?'<span class="you">你</span>':'')+'</td>'+
+        '<td><span class="role '+x.role+'">'+ROLE[x.role]+'</span>'+(x.guestAllowed?' <span class="muted">· 免登录</span>':x.browseOnly?' <span class="muted">· 仅浏览</span>':'')+'</td><td>'+(x.linked?'<b class="hg">'+esc(x.uidName||'红果用户')+'</b><div class="muted mono">'+esc(x.uid)+'</div>':(x.guestUsed?'<span class="hg">'+(x.browseOnly?'仅浏览已使用':'免登录使用中')+'</span>':'<span class="muted">未绑定</span>'))+'</td>'+
+        '<td class="hide-m muted">'+(x.linked||x.guestUsed?when(x.seen):'—')+'</td>'+
+        '<td class="hide-m"><div class="note">'+(x.note?esc(x.note):'<span class="muted">—</span>')+'</div></td><td class="hide-m muted">'+date(x.created)+'</td>'+
+        '<td><div class="acts"><button class="ib" data-msg="'+x.code+'" title="复制邀请语"'+(x.linked?' disabled':'')+'>'+I.msg+'</button>'+
+          '<button class="ib" data-edit="'+x.code+'" title="编辑备注"'+(x.manage||x.self?'':' disabled')+'>'+I.edit+'</button>'+
+          '<button class="ib del" data-del="'+x.code+'" title="作废"'+(x.manage?'':' disabled')+'>'+I.trash+'</button></div></td></tr>';
+    }).join('');
+  }
+  function filtered(){
+    return D.invites.filter(function(x){
+      var used=x.linked||x.guestUsed;
+      if(F==='free'&&used)return false;
+      if(F==='used'&&!used)return false;
+      if(F==='staff'&&x.role==='member')return false;
+      if(!Q)return true;
+      var q=Q.toUpperCase(),qc=q.replace(/[\s_-]/g,'');
+      return x.code.replace(/-/g,'').indexOf(qc)>=0||x.code.indexOf(q)>=0||(x.note||'').toUpperCase().indexOf(q)>=0||(x.uidName||'').toUpperCase().indexOf(q)>=0;
+    });
+  }
+  function render(){
+    if(!D)return;
+    if(VIEW!=='blocked')VIEW='invites';
+    $('#me').className='role '+D.role;$('#me').textContent=ROLE[D.role];
+    var m=$('#main');
+    var head='<div class="head"><div><h1>邀请码</h1><div class="sum"><span><b>'+D.invites.length+'</b> 个</span><span><b>'+D.used+'</b> 已使用</span><span><b>'+D.active+'</b> 近 7 天活跃</span><span>同时在线 <b>'+(D.onlineCount||0)+'</b> / '+(D.maxOnline?D.maxOnline:'不限')+'</span></div></div><div class="sp"></div><button class="btn" data-cap>在线人数上限</button><button class="btn pri" data-new>'+I.plus+'生成邀请码</button></div>'+
+      '<div class="tabs"><button data-v="invites" class="'+(VIEW==='invites'?'on':'')+'">邀请码</button><button data-v="blocked" class="'+(VIEW==='blocked'?'on':'')+'">黑名单'+(D.blocked.length?'<sup>'+D.blocked.length+'</sup>':'')+'</button></div>';
+    if(VIEW==='invites'){
+      m.innerHTML=head+'<div class="bar"><div class="search">'+I.search+'<input id="q" placeholder="搜索邀请码、备注、账号" value="'+esc(Q)+'"></div>'+
+        '<div class="seg">'+[['all','全部'],['free','未使用'],['used','已使用'],['staff','管理员']].map(function(f){return '<button data-f="'+f[0]+'" class="'+(F===f[0]?'on':'')+'">'+f[1]+'</button>'}).join('')+'</div></div>'+
+        '<table>'+HEAD+'<tbody>'+inviteRows(filtered())+'</tbody></table>';
+      var q=$('#q');q.oninput=function(){Q=q.value.trim();$('tbody',m).innerHTML=inviteRows(filtered())};
+    }else{
+      m.innerHTML=head+'<table><thead><tr><th>浏览器</th><th>IP</th><th>原因</th><th>时间</th><th></th></tr></thead><tbody>'+
+        (D.blocked.length?D.blocked.map(function(b){return '<tr><td><span class="hg">'+esc(b.label||'未知')+'</span><div class="muted mono">'+esc(b.fp.slice(0,16))+'…</div></td><td>'+esc(b.ip||'—')+'</td><td class="muted">'+esc(b.reason||'')+'</td><td class="muted">'+when(b.at)+'</td><td><div class="acts" style="opacity:1"><button class="btn" data-unblk="'+esc(b.fp)+'">解除</button></div></td></tr>'}).join(''):'<tr><td colspan="5" class="empty">暂无</td></tr>')+
+        '</tbody></table>';
+    }
+  }
+  function find(c){return D.invites.filter(function(x){return x.code===c})[0]}
+  document.addEventListener('click',function(e){
+    var b;
+    if(b=e.target.closest('.tabs [data-v]')){VIEW=b.dataset.v;location.hash=VIEW;render();return}
+    if(e.target.closest('[data-new]'))return createDlg();
+    if(e.target.closest('[data-cap]'))return settingsDlg();
+    if(b=e.target.closest('[data-f]')){F=b.dataset.f;render();return}
+    if(b=e.target.closest('[data-copy]'))return copy(b.dataset.copy,'邀请码已复制');
+    if((b=e.target.closest('[data-msg]'))&&!b.disabled)return copy(inviteMsg(b.dataset.msg),'邀请语已复制');
+    if((b=e.target.closest('[data-edit]'))&&!b.disabled)return editDlg(find(b.dataset.edit));
+    if((b=e.target.closest('[data-del]'))&&!b.disabled){var c=b.dataset.del;return confirmBox('作废 '+c+'？','绑定的红果账号将立即失去访问权限，不可撤销。','作废',true).then(function(ok){if(ok)api('/api/invite/delete',{code:c}).then(function(){toast('已作废');load()}).catch(function(er){toast(er.message)})})}
+    if(b=e.target.closest('[data-unblk]')){var fp=b.dataset.unblk;return confirmBox('解除限制？','该浏览器将可以重新输入邀请码。','解除',false).then(function(ok){if(ok)api('/api/invite/unblock',{fp:fp}).then(function(){toast('已解除');load()}).catch(function(er){toast(er.message)})})}
+  });
+  window.addEventListener('hashchange',function(){VIEW=location.hash.slice(1)||'invites';render()});
+  function load(){api('/api/invite/list').then(function(d){D=d;render()}).catch(function(er){$('#main').innerHTML='<div class="empty">'+esc(er.message)+'</div>'})}
+  load();
+})();
+</script>
+</body>
+</html>

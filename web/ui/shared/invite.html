@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>绿果WEB</title>
+<link rel="icon" type="image/png" href="/shared/favicon.png">
+<script>try{var m=JSON.parse(localStorage.getItem('lvguo.settings')||'{}').theme||'auto';var d=m==='dark'||(m==='auto'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.setAttribute('data-theme',d?'dark':'light')}catch(e){}</script>
+<style>
+/* 登录页：与主站同一套简约风格——纯净底色、墨色主按钮、发丝线；绿色只做点缀 */
+:root{--bg:#fff;--text:#0c0c0d;--sub:#4b4b4f;--faint:#8b8b90;--line:rgba(0,0,0,.1);--box:rgba(0,0,0,.04);--ink:#15803d;--ink-on:#fff;--pri:#15803d;--ok:#15803d;--danger:#dc2626;color-scheme:light}
+:root[data-theme=dark]{--bg:#0a0a0b;--text:#f4f4f5;--sub:#b5b5ba;--faint:#7c7c82;--line:rgba(255,255,255,.12);--box:rgba(255,255,255,.06);--ink:#4ade80;--ink-on:#052e16;--pri:#4ade80;--ok:#4ade80;--danger:#f87171;color-scheme:dark}
+*{box-sizing:border-box;margin:0}
+html,body{min-height:100%}
+body{min-height:100dvh;background:var(--bg);color:var(--text);font:16px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+button,a{font:inherit;color:inherit;cursor:pointer;text-decoration:none}
+.bg{display:none}
+.page{min-height:100dvh;display:grid;grid-template-columns:1fr 440px;align-items:center;gap:96px;max-width:1120px;margin:0 auto;padding:48px 40px}
+.page>*{min-width:0}
+.brand{display:flex;align-items:center;gap:12px}
+.brand img{width:40px;height:40px;border-radius:10px}
+.brand b{font-size:19px;font-weight:700}
+.brand b span{color:var(--ok)}
+h1{margin-top:40px;font-size:clamp(32px,3.6vw,48px);line-height:1.18;font-weight:700;letter-spacing:-.025em;white-space:nowrap}
+h1 em{font-style:normal;color:var(--pri)}
+.intro{margin-top:16px;max-width:30em;color:var(--sub);font-size:16px}
+.feats{margin-top:26px;display:flex;flex-wrap:nowrap;gap:22px;overflow:hidden}
+.feats span{flex:none;display:inline-flex;align-items:center;gap:6px;color:var(--sub);font-size:14px;white-space:nowrap}
+.feats svg{width:15px;height:15px;color:var(--pri)}
+.card{position:relative;padding:32px;border-radius:16px;border:1px solid var(--line)}
+.tag{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;color:var(--faint)}
+.tag i{display:none}
+.card h2{margin-top:10px;font-size:24px;font-weight:700;letter-spacing:-.01em}
+.card .why{margin-top:6px;color:var(--sub);font-size:14.5px}
+.step{animation:in .3s cubic-bezier(.22,1,.36,1) both}
+@keyframes in{from{opacity:0;transform:translateY(6px)}}
+.chead{display:flex;align-items:center;gap:10px}
+.back{flex:none;display:grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:8px;background:none;color:var(--faint);margin-left:-6px;transition:background .15s,color .15s}
+.back:hover{background:var(--box);color:var(--text)}
+.back svg{width:17px;height:17px}
+.choices{margin-top:26px;display:grid}
+.choice{display:flex;align-items:center;gap:14px;padding:16px 4px;border:0;border-top:1px solid var(--line);background:none;text-align:left;transition:background .15s}
+.choice:last-child{border-bottom:1px solid var(--line)}
+.choice:hover{background:var(--box)}
+.choice .ci{flex:none;display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:var(--box);color:var(--text)}
+.choice .ci svg{width:20px;height:20px}
+.choice b{display:block;font-size:16px;font-weight:600}
+.choice small{display:block;margin-top:1px;color:var(--faint);font-size:13.5px}
+.choice .ar{margin-left:auto;color:var(--faint);font-size:20px}
+.otp{margin-top:24px;display:flex;align-items:center;gap:8px}
+.otp input{flex:1;min-width:0;width:0;height:54px;border:0;border-radius:10px;background:var(--box);color:var(--text);font:600 22px/1 ui-monospace,SFMono-Regular,Menlo,monospace;text-align:center;text-transform:uppercase;outline:0;caret-color:var(--pri);box-shadow:inset 0 0 0 1px transparent;transition:box-shadow .15s}
+.otp input:focus{box-shadow:inset 0 0 0 1.5px var(--ink)}
+.otp input:disabled{opacity:.45}
+.otp .dash{flex:none;width:10px;height:1.5px;background:var(--faint)}
+.otp.bad input{box-shadow:inset 0 0 0 1.5px var(--danger);animation:shake .35s}
+@keyframes shake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+.msg{min-height:22px;margin-top:10px;font-size:14px;color:var(--danger)}
+.msg.ok{color:var(--ok)}
+#info-msg:empty,#login-msg:empty{display:none}
+.btn{display:flex;align-items:center;justify-content:center;width:100%;height:48px;margin-top:8px;border:0;border-radius:10px;background:var(--ink);color:var(--ink-on);font-size:15.5px;font-weight:600;transition:opacity .15s}
+.btn:hover{opacity:.86}.btn:active{opacity:.7}.btn[disabled]{opacity:.45;cursor:default}
+.btn.ghost{background:none;color:var(--text);box-shadow:inset 0 0 0 1px var(--line)}
+/* 登录方式：文字页签 */
+.lmode{margin-top:22px;display:flex;gap:24px;border-bottom:1px solid var(--line)}
+.lmode button{position:relative;height:40px;padding:0;border:0;background:none;color:var(--faint);font-size:15px;font-weight:500}
+.lmode button:hover{color:var(--text)}
+.lmode button.on{color:var(--text);font-weight:600}
+.lmode button.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--ink)}
+.pform{margin-top:22px;display:grid;gap:10px}
+.fld{position:relative}
+.fld input{width:100%;height:50px;padding:0 14px;border:0;border-radius:10px;background:var(--box);color:var(--text);font-size:16px;font-weight:500;letter-spacing:.02em;outline:0;box-shadow:inset 0 0 0 1px transparent;transition:box-shadow .15s;font-variant-numeric:tabular-nums}
+.fld input::placeholder{color:var(--faint);font-weight:400;letter-spacing:0}
+.fld input:focus{box-shadow:inset 0 0 0 1.5px var(--ink)}
+.fld.code input{padding-right:124px}
+.fld .send{position:absolute;right:6px;top:6px;height:38px;min-width:104px;padding:0 12px;border:0;border-radius:8px;background:none;color:var(--text);font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.fld .send:hover:not([disabled]){background:var(--box)}
+.fld .send[disabled]{color:var(--faint);font-weight:400}
+.pform .btn{margin-top:6px}
+/* 短信验证：扫码直接发送 / 手动发送 → 点「我已发送」校验 */
+.mfa{margin-top:22px}
+.mfa .sq{display:flex;align-items:center;gap:20px;padding-bottom:20px;border-bottom:1px solid var(--line)}
+.mfa .sq img{flex:none;width:132px;height:132px;padding:8px;border-radius:10px;background:#fff;box-shadow:inset 0 0 0 1px var(--line)}
+.mfa .sq b{display:block;font-size:15px;font-weight:600}
+.mfa .sq span{display:block;margin-top:4px;font-size:13.5px;color:var(--faint);line-height:1.6}
+.mfa dl{margin:18px 0 0;display:grid;grid-template-columns:auto 1fr;gap:10px 18px;align-items:baseline}
+.mfa dt{font-size:13.5px;color:var(--faint)}
+.mfa dd{margin:0;font:600 19px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.03em;color:var(--text);word-break:break-all}
+.mfa dd button{margin-left:10px;padding:0;border:0;background:none;color:var(--faint);font:13px system-ui,sans-serif;letter-spacing:0;vertical-align:2px}
+.mfa dd button:hover{color:var(--text)}
+.mfa .btn{margin-top:22px}
+.mfa .again{display:block;margin:14px auto 0;padding:0;border:0;background:none;color:var(--faint);font-size:13.5px}
+.mfa .again:hover{color:var(--text)}
+.bind-change{display:block;margin:14px auto 0;padding:4px;border:0;background:none;color:var(--sub);font:13.5px system-ui,sans-serif;cursor:pointer}
+.bind-change:hover{color:var(--ok)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.qrw{margin-top:22px;display:flex;align-items:center;gap:24px}
+.qrset{flex:none;display:flex;flex-direction:column;align-items:center;gap:8px}
+.qr{position:relative;flex:none;width:164px;height:164px;padding:8px;border-radius:10px;background:#fff;box-shadow:inset 0 0 0 1px var(--line)}
+.qr img{position:relative;display:block;width:100%;height:100%}
+.qr .qr-skeleton{position:absolute;inset:8px;display:grid;place-items:center;overflow:hidden;border-radius:6px;background:#f1f2f1;color:#d3d6d3}
+.qr .qr-skeleton[hidden]{display:none}
+.qr .qr-skeleton svg{width:100%;height:100%;padding:8px;fill:currentColor}
+.qr .qr-skeleton:after{content:"";position:absolute;inset:0;background:linear-gradient(105deg,transparent 28%,rgba(255,255,255,.8) 48%,transparent 68%);transform:translateX(-100%);animation:qrShimmer 1.45s ease-in-out infinite}
+@keyframes qrShimmer{to{transform:translateX(100%)}}
+.qr .mask{position:absolute;inset:0;border-radius:10px;display:none;place-items:center;text-align:center;background:rgba(255,255,255,.96);color:#0c0c0d;font-size:14px;font-weight:600}
+.qr .mask.on{display:grid}
+.qr .mask svg{width:32px;height:32px;color:#15803d;margin:0 auto 6px}
+.qr .mask button{margin-top:8px;height:32px;padding:0 14px;border:0;border-radius:8px;background:#15803d;color:#fff;font-size:13px}
+.qr-refresh{padding:2px 6px;color:var(--sub);font-size:12.5px;transition:color .18s}
+.qr-refresh:hover:not(:disabled){color:var(--text)}
+.qr-refresh:disabled{cursor:wait;opacity:.45}
+.qsteps{display:grid;gap:12px;font-size:14px;color:var(--sub)}
+.qsteps div{display:flex;gap:10px;align-items:baseline}
+.qsteps b{flex:none;width:16px;color:var(--faint);font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+.openapp{display:none;margin-top:20px}
+.qalt{display:none;font-size:13.5px;color:var(--sub)}
+#info-acts{margin-top:20px}
+#info-acts:empty{display:none}
+.who{display:inline-flex;align-items:center;gap:8px;margin-top:14px;font-size:14px;color:var(--sub)}
+.who i{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--box);color:var(--text);font-style:normal;font-size:12px;font-weight:700}
+.who button{border:0;background:none;color:var(--faint);font-size:13px;text-decoration:underline;text-underline-offset:3px}
+.who button:hover{color:var(--text)}
+[hidden]{display:none!important}
+@media (max-width:980px){
+  .page{grid-template-columns:1fr;gap:32px;padding:36px 20px 28px;align-content:start;max-width:520px}
+  h1{margin-top:22px;font-size:32px}.intro{font-size:15px}.feats{margin-top:16px}
+  .card{padding:24px 20px}
+  .otp{gap:5px}.otp input{height:48px;font-size:19px}
+}
+@media (max-width:640px){
+  .page{gap:22px;padding:calc(28px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom))}
+  h1{margin-top:16px;font-size:26px}.intro{display:none}
+  .openapp{display:flex}
+  .qrw{gap:14px}.qr{width:112px;height:112px}
+  .qsteps{display:none}.qalt{display:block}
+}
+</style>
+</head>
+<body>
+<div class="bg"><div class="wall"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+<div class="page">
+  <section>
+    <div class="brand"><img src="/shared/logo.png" alt=""><b>绿果<span>WEB</span></b></div>
+    <h1>好剧，值得<em>一块大屏</em></h1>
+    <p class="intro">高清画质、真实弹幕、多季连播，进度与手机 App 同步。</p>
+    <div class="feats"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12l5 5L20 7"/></svg>1080P 高清</span><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12l5 5L20 7"/></svg>真实弹幕</span><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12l5 5L20 7"/></svg>多季连播</span><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12l5 5L20 7"/></svg>进度同步</span></div>
+  </section>
+
+  <div class="card" id="card">
+    <!-- 0. 选择入口 -->
+    <div class="step" id="s-start" hidden>
+      <span class="tag"><i></i>访问方式</span>
+      <h2>欢迎来到绿果WEB</h2>
+      <p class="why">登录后即可观看并同步进度</p>
+      <div class="choices">
+        <button class="choice" data-go="login"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg></span><span><b>我已绑定邀请码</b><small>登录已绑定邀请码的红果账号</small></span><span class="ar">›</span></button>
+        <button class="choice" data-go="code"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 7a4 4 0 1 1-3.5 6L4 20.5V17h3v-3h3l1.5-1.5"/></svg></span><span><b>我有邀请码</b><small>输入邀请码，按类型进入或绑定账号</small></span><span class="ar">›</span></button>
+      </div>
+    </div>
+
+    <!-- 1. 输入邀请码 -->
+    <form class="step" id="s-code" autocomplete="off" hidden>
+      <div class="chead"><button type="button" class="back" data-go="start" aria-label="返回" title="返回"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button><span class="tag" id="code-tag"><i></i>输入邀请码</span></div>
+      <h2>输入邀请码</h2>
+      <p class="why" id="code-why">4 至 32 位字母或数字，支持粘贴</p>
+      <div class="otp" id="otp"></div>
+      <p class="msg" id="code-msg"></p>
+      <button class="btn" id="code-go" type="submit">下一步</button>
+    </form>
+
+    <!-- 2. 扫码登录红果 -->
+    <div class="step" id="s-login" hidden>
+      <div class="chead"><button type="button" class="back" data-go="start" aria-label="返回" title="返回"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button><span class="tag" id="login-tag"><i></i>登录红果</span></div>
+      <h2 id="login-title">用红果 App 扫码</h2>
+      <p class="why" id="login-why">登录已绑定邀请码的红果账号即可进入。</p>
+      <div class="lmode" id="lmode"><button type="button" data-lm="qr" class="on">扫码登录</button><button type="button" data-lm="phone">手机号登录</button></div>
+      <div id="pane-qr">
+      <a class="btn openapp" id="openapp" href="#">打开红果 App 登录</a>
+      <div class="qrw">
+        <div class="qrset"><div class="qr"><div class="qr-skeleton" id="qr-skeleton" role="status" aria-label="正在生成二维码"><svg viewBox="0 0 160 160" aria-hidden="true"><path fill-rule="evenodd" d="M12 12h42v42H12zM19 19v28h28V19zM106 12h42v42h-42zM113 19v28h28V19zM12 106h42v42H12zM19 113v28h28v-28z"/><path d="M26 26h14v14H26zM120 26h14v14h-14zM26 120h14v14H26zM66 12h8v8h-8zM80 12h8v8h-8zM66 26h8v8h-8zM80 40h8v8h-8zM66 54h8v8h-8zM94 54h8v8h-8zM66 68h8v8h-8zM80 68h8v8h-8zM94 68h8v8h-8zM108 68h8v8h-8zM122 68h8v8h-8zM136 68h8v8h-8zM66 82h8v8h-8zM94 82h8v8h-8zM122 82h8v8h-8zM66 96h8v8h-8zM80 96h8v8h-8zM94 96h8v8h-8zM108 96h8v8h-8zM136 96h8v8h-8zM66 110h8v8h-8zM80 124h8v8h-8zM94 110h8v8h-8zM108 124h8v8h-8zM122 110h8v8h-8zM136 124h8v8h-8zM66 138h8v8h-8zM94 138h8v8h-8zM108 138h8v8h-8zM136 138h8v8h-8z"/></svg></div><img id="qr" alt="" hidden><div class="mask" id="qr-mask"></div></div><button type="button" class="qr-refresh" id="qr-refresh" aria-label="刷新二维码">刷新二维码</button></div>
+        <div class="qsteps"><div><b>1</b><span>打开红果 App</span></div><div><b>2</b><span>「我的」页右上角扫一扫</span></div><div><b>3</b><span>在手机上确认登录</span></div></div>
+        <p class="qalt">也可用另一台手机扫码</p>
+      </div>
+      </div>
+      <form class="pform" id="pane-phone" hidden autocomplete="off">
+        <div class="fld"><input id="ph" type="tel" inputmode="numeric" maxlength="13" placeholder="手机号" aria-label="手机号" autocomplete="tel-national"></div>
+        <div class="fld code"><input id="pc" type="text" inputmode="numeric" maxlength="8" placeholder="验证码" aria-label="验证码" autocomplete="one-time-code"><button type="button" class="send" id="psend">获取验证码</button></div>
+        <button class="btn" id="pgo">登录</button>
+      </form>
+      <div class="mfa" id="pane-mfa" hidden>
+        <div class="sq" id="mfa-sq"><img id="mfa-qr" alt="扫码发送短信"><div><b>用登录手机相机扫码</b><span>打开页面后按提示发送短信</span></div></div>
+        <dl><dt>发送内容</dt><dd><span id="mfa-content"></span><button type="button" data-cp="mfa-content">复制</button></dd><dt>发送到</dt><dd><span id="mfa-number"></span><button type="button" data-cp="mfa-number">复制</button></dd></dl>
+        <button type="button" class="btn" id="mfa-done">我已发送</button>
+        <button type="button" class="again" id="mfa-again">重新获取验证码</button>
+      </div>
+      <p class="msg" id="login-msg"></p>
+    </div>
+
+    <!-- 3. 已登录红果、需要邀请码 / 结果 -->
+    <div class="step" id="s-info" hidden>
+      <span class="tag" id="info-tag"><i></i>提示</span>
+      <h2 id="info-title"></h2>
+      <p class="why" id="info-text"></p>
+      <div id="info-who"></div>
+      <p class="msg" id="info-msg"></p>
+      <div id="info-acts"></div>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  function $(id){return document.getElementById(id)}
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+  var MOBILE=matchMedia('(max-width:640px)').matches;
+  function canvasSig(){try{var c=document.createElement('canvas');c.width=240;c.height=60;var x=c.getContext('2d');x.textBaseline='top';x.font='16px "Arial"';x.fillStyle='#f60';x.fillRect(100,1,62,20);x.fillStyle='#069';x.fillText('绿果TV·lvguo ✓ 2026',2,15);x.fillStyle='rgba(102,204,0,.7)';x.fillText('绿果TV·lvguo ✓ 2026',4,17);return c.toDataURL()}catch(e){return ''}}
+  function glSig(){try{var c=document.createElement('canvas'),g=c.getContext('webgl')||c.getContext('experimental-webgl');if(!g)return '';var d=g.getExtension('WEBGL_debug_renderer_info');return [g.getParameter(d?d.UNMASKED_VENDOR_WEBGL:g.VENDOR),g.getParameter(d?d.UNMASKED_RENDERER_WEBGL:g.RENDERER),g.getParameter(g.MAX_TEXTURE_SIZE)].join('|')}catch(e){return ''}}
+  var FP='';
+  var fpReady=(function(){
+    var parts=[navigator.userAgent,navigator.language,(navigator.languages||[]).join(','),navigator.platform,navigator.hardwareConcurrency,navigator.deviceMemory,
+      screen.width+'x'+screen.height+'x'+screen.colorDepth,window.devicePixelRatio,Intl.DateTimeFormat().resolvedOptions().timeZone,new Date().getTimezoneOffset(),
+      navigator.maxTouchPoints,canvasSig(),glSig()].join('##');
+    if(!(window.crypto&&crypto.subtle))return Promise.resolve('');
+    return crypto.subtle.digest('SHA-256',new TextEncoder().encode(parts)).then(function(b){FP=Array.from(new Uint8Array(b)).map(function(x){return x.toString(16).padStart(2,'0')}).join('');return FP});
+  })();
+  function post(url,body){return fpReady.then(function(){return fetch(url,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({fp:FP},body||{}))})}).then(function(r){return r.json().then(function(j){j._status=r.status;return j})})}
+  function enter(){
+    var dest=location.pathname==='/admin'?'/admin':'/';
+    try{
+      var back=sessionStorage.getItem('lvguo.back')||'';
+      if(dest==='/'&&back){
+        if(back.indexOf('#/')===0)back=back.slice(1);
+        if(/^\/(?:home|feed|rank|category|mine(?:\/(?:history|fav|reserve))?|detail\/\d+|settings|search)?(?:\?[^#]*)?$/.test(back))dest=back;
+      }
+      sessionStorage.removeItem('lvguo.back');
+    }catch(e){}
+    location.replace(dest);
+  }
+  var CODE='',LOGGED=false,NAME='',POLL=0,QRT=0,QGEN=0,VIEW=0;
+  try{CODE=sessionStorage.getItem('lvguo.invite.pending')||''}catch(e){}
+  function rememberCode(code){CODE=code;try{if(code)sessionStorage.setItem('lvguo.invite.pending',code);else sessionStorage.removeItem('lvguo.invite.pending')}catch(e){}}
+  function show(id){VIEW++;['s-start','s-code','s-login','s-info'].forEach(function(s){$(s).hidden=s!==id});var el=$(id);el.classList.remove('step');void el.offsetWidth;el.classList.add('step');if(id!=='s-login')stopQR()}
+  document.addEventListener('click',function(e){var b=e.target.closest('[data-go]');if(!b)return;var t=b.dataset.go;
+    if(t==='start'){rememberCode('');show('s-start')}else if(t==='code'){showCode()}else if(t==='login'){rememberCode('');startLogin()}
+    else if(t==='switch'){fetch('/api/logout',{method:'POST',credentials:'same-origin'}).then(function(){LOGGED=false;startLogin()})}});
+  // 已登录红果但未受邀
+  function needCode(err){
+    show('s-info');$('info-tag').innerHTML='<i></i>尚未绑定';$('info-title').textContent='该账号尚未绑定邀请码';$('info-text').textContent='输入可绑定的邀请码后进入';
+    $('info-who').innerHTML=NAME?'<span class="who"><i>'+esc(NAME[0])+'</i>'+esc(NAME)+' <button data-go="switch">切换账号</button></span>':'';
+    $('info-msg').textContent=err||'';
+    $('info-acts').innerHTML='<button class="btn" id="tocode">输入邀请码</button>';$('tocode').onclick=function(){showCode()};
+  }
+  // ---------- 邀请码
+  var otp=$('otp'),cells=[];
+  var c=document.createElement('input');c.maxLength=40;c.inputMode='text';c.autocapitalize='characters';c.spellcheck=false;c.setAttribute('aria-label','邀请码');otp.appendChild(c);cells.push(c);
+  function value(){return c.value.toUpperCase().replace(/[\s_-]/g,'')}
+  c.addEventListener('input',function(){otp.classList.remove('bad');$('code-msg').textContent=''});
+  function lock(msg){cells.forEach(function(c){c.disabled=true});$('code-go').disabled=true;$('code-go').textContent='已限制访问';$('code-msg').textContent=msg}
+  function showCode(){show('s-code');$('code-tag').innerHTML='<i></i>'+(LOGGED?'绑定邀请码':'输入邀请码');$('code-why').textContent=LOGGED&&NAME?'绑定到 '+NAME:'4 至 32 位字母或数字，支持粘贴';c.value='';$('code-go').textContent=LOGGED?'绑定并进入':'下一步';$('code-msg').className='msg';$('code-msg').textContent='';setTimeout(function(){c.focus()},50)}
+  var busy=false;
+  function prepareBrowseProof(){
+    var bytes=new Uint8Array(16);crypto.getRandomValues(bytes);
+    var token=Array.from(bytes).map(function(x){return x.toString(16).padStart(2,'0')}).join('');
+    localStorage.setItem('lvguo.browse.proof',token);
+    return fetch('/shared/browse-proof?token='+token,{cache:'force-cache',credentials:'same-origin'}).then(function(r){if(!r.ok)throw new Error('cache unavailable')});
+  }
+  function idle(){busy=false;$('code-go').disabled=false;$('code-go').textContent=LOGGED?'绑定并进入':'下一步'}
+  function submitCode(){
+    if(busy)return;var v=value();
+    if(!/^[A-Z0-9]{4,32}$/.test(v)){$('code-msg').textContent='请输入 4 至 32 位字母或数字';otp.classList.add('bad');return}
+    busy=true;$('code-go').disabled=true;$('code-go').textContent='正在验证…';
+    var code=v.length===8?v.slice(0,4)+'-'+v.slice(4):v;
+    post(LOGGED?'/api/invite/redeem':'/api/invite/check',{code:code}).then(function(j){
+      idle();
+      if(j.blocked)return lock(j.error);
+      if(j.needLogin){LOGGED=false;rememberCode(code);return startLogin()}
+      if(j._status>=400){otp.classList.add('bad');$('code-msg').textContent=j.error||'验证失败，请重试';return}
+      if(!LOGGED&&j.guest){rememberCode(j.browseOnly?'':code);if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(function(){});if(j.browseOnly)return prepareBrowseProof().then(enter).catch(function(){$('code-msg').textContent='浏览器缓存不可用，请允许网站存储后重试'});return enter()}
+      if(!LOGGED&&j.used){otp.classList.add('bad');$('code-msg').textContent='该邀请码已被使用';return}
+      if(LOGGED){$('code-msg').className='msg ok';$('code-msg').textContent='绑定成功';return setTimeout(enter,400)}
+      rememberCode(code);startLogin();
+    }).catch(function(){idle();$('code-msg').textContent='网络异常，请重试'});
+  }
+  $('s-code').addEventListener('submit',function(e){e.preventDefault();submitCode()});
+  // ---------- 红果登录
+  function stopQR(){clearTimeout(POLL);clearTimeout(QRT);clearTimeout(MFAT);QGEN++}
+  // 登录方式：扫码 / 手机号验证码（红果要求二次验证时，引导用登录手机发一条短信）
+  var LM='qr',MFAT=0,CDT=0,PBUSY=false;
+  function loginMode(m){
+    LM=m;stopQR();$('login-msg').textContent='';
+    [].forEach.call($('lmode').children,function(b){b.classList.toggle('on',b.dataset.lm===m)});
+    $('lmode').hidden=false;$('pane-qr').hidden=m!=='qr';$('pane-phone').hidden=m!=='phone';$('pane-mfa').hidden=true;
+    if(m==='qr'){setTitle();newQR()}else{$('login-title').textContent='手机号登录';$('login-why').textContent='使用红果账号绑定的手机号';setTimeout(function(){($('ph').value?$('pc'):$('ph')).focus()},60)}
+  }
+  $('lmode').addEventListener('click',function(e){var b=e.target.closest('[data-lm]');if(b&&b.dataset.lm!==LM)loginMode(b.dataset.lm)});
+  function phoneOK(){return /^1\d{10}$/.test($('ph').value.replace(/\D/g,'').replace(/^86(?=\d{11}$)/,''))}
+  function cooldown(n){clearInterval(CDT);var b=$('psend');b.disabled=true;b.textContent=n+' 秒后重发';CDT=setInterval(function(){n--;if(n<=0){clearInterval(CDT);b.disabled=false;b.textContent='重新获取'}else b.textContent=n+' 秒后重发'},1000)}
+  $('psend').onclick=function(){
+    if(!phoneOK()){$('login-msg').textContent='请输入正确的 11 位手机号';$('ph').focus();return}
+    var b=$('psend');b.disabled=true;b.textContent='发送中…';$('login-msg').textContent='';
+    post('/api/login/phone/send',{phone:$('ph').value}).then(function(j){
+      if(!j.ok){b.disabled=false;b.textContent='获取验证码';$('login-msg').textContent=j.error||'验证码发送失败';return}
+      cooldown(60);$('pc').focus();
+    }).catch(function(){b.disabled=false;b.textContent='获取验证码';$('login-msg').textContent='网络异常，请重试'});
+  };
+  function phoneState(j){
+    if(j.state==='ok'){stopQR();afterLogin();return true}
+    if(j.state==='mfa'){$('lmode').hidden=true;$('pane-phone').hidden=true;$('pane-mfa').hidden=false;$('login-title').textContent='短信验证';$('login-why').textContent='用登录手机发送一条短信，确认是本人操作';
+      $('mfa-content').textContent=j.content;$('mfa-number').textContent=j.number;$('login-msg').textContent='';
+      $('mfa-sq').hidden=!j.qr;if(j.qr)$('mfa-qr').src=j.qr;
+      var d=$('mfa-done');d.disabled=false;d.textContent='我已发送';return true}
+    return false;
+  }
+  // 发完短信后手动点「我已发送」再校验；短信到达有延迟，服务端还没收到时自动再确认几次
+  function mfaVerify(n){
+    var gen=QGEN,d=$('mfa-done');d.disabled=true;d.textContent='正在确认…';$('login-msg').className='msg';$('login-msg').textContent='';
+    post('/api/login/phone/verify').then(function(j){
+      if(gen!==QGEN||$('pane-mfa').hidden)return;
+      if(phoneState(j))return;
+      if(j.state==='pending'){
+        if(n<4){MFAT=setTimeout(function(){mfaVerify(n+1)},2500);return}
+        d.disabled=false;d.textContent='我已发送';$('login-msg').textContent='尚未收到短信，请确认已用登录手机发送后再试';return;
+      }
+      d.disabled=false;d.textContent='我已发送';$('login-msg').textContent=j.error||'验证未通过';
+      if(/重新获取/.test(j.error||'')){d.disabled=true;d.textContent='验证已结束'}
+    }).catch(function(){if(gen!==QGEN||$('pane-mfa').hidden)return;d.disabled=false;d.textContent='我已发送';$('login-msg').textContent='网络异常，请重试'});
+  }
+  $('mfa-done').onclick=function(){clearTimeout(MFAT);mfaVerify(0)};
+  $('pane-mfa').addEventListener('click',function(e){
+    var b=e.target.closest('[data-cp]');if(!b)return;var t=$(b.dataset.cp).textContent;if(b.dataset.cp==='mfa-number')t=t.replace(/\s/g,'');
+    (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){b.textContent='已复制';setTimeout(function(){b.textContent='复制'},1400)},function(){});
+  });
+  $('mfa-again').onclick=function(){loginMode('phone')};
+  $('pane-phone').addEventListener('submit',function(e){
+    e.preventDefault();if(PBUSY)return;
+    var code=$('pc').value.replace(/\D/g,'');
+    if(!phoneOK()){$('login-msg').textContent='请输入正确的 11 位手机号';return}
+    if(code.length<4){$('login-msg').textContent='请输入短信里的验证码';$('pc').focus();return}
+    PBUSY=true;$('pgo').disabled=true;$('pgo').textContent='正在登录…';$('login-msg').textContent='';
+    post('/api/login/phone/login',{code:code}).then(function(j){
+      PBUSY=false;$('pgo').disabled=false;$('pgo').textContent='登录';
+      if(!phoneState(j))$('login-msg').textContent=j.error||'登录失败，请重试';
+    }).catch(function(){PBUSY=false;$('pgo').disabled=false;$('pgo').textContent='登录';$('login-msg').textContent='网络异常，请重试'});
+  });
+  function setTitle(){
+    $('login-title').textContent=CODE?'绑定红果账号':(MOBILE?'登录红果账号':'用红果 App 扫码');
+    $('login-why').textContent=CODE?'邀请码将绑定到登录的红果账号':'登录已绑定邀请码的红果账号';
+  }
+  function startLogin(){
+    show('s-login');$('login-msg').textContent='';
+    $('login-tag').innerHTML='<i></i>'+(CODE?'第 2 步 · 共 2 步':'登录红果');
+    loginMode(LM);
+  }
+  function newQR(){
+    stopQR();var gen=QGEN,img=$('qr'),sk=$('qr-skeleton'),mask=$('qr-mask'),refresh=$('qr-refresh');
+    mask.className='mask';mask.textContent='';img.hidden=true;img.removeAttribute('src');sk.hidden=false;refresh.disabled=true;$('login-msg').textContent='';
+    fetch('/api/login/start',{method:'POST',credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){
+      if(gen!==QGEN)return;
+      if(!j.qr){refresh.disabled=false;mask.textContent=j.error||'二维码获取失败，请刷新重试';mask.className='mask on';return}
+      img.onload=function(){if(gen!==QGEN)return;img.hidden=false;sk.hidden=true;refresh.disabled=false;mask.className='mask'};
+      img.onerror=function(){if(gen!==QGEN)return;refresh.disabled=false;mask.textContent='二维码加载失败，请刷新重试';mask.className='mask on'};
+      img.src=j.qr;if(img.complete&&img.naturalWidth>0)img.onload();if(j.open)$('openapp').href=j.open;
+      QRT=setTimeout(function(){expired(gen)},Math.max(20000,(j.expiresAt||Date.now()+60000)-Date.now()));poll(gen);
+    }).catch(function(){if(gen!==QGEN)return;refresh.disabled=false;mask.textContent='网络异常，请刷新重试';mask.className='mask on'});
+  }
+  $('qr-refresh').addEventListener('click',newQR);
+  function expired(gen){if(gen!==QGEN)return;stopQR();$('qr-mask').innerHTML='<div>二维码已过期<br><button type="button" id="reqr">刷新</button></div>';$('qr-mask').className='mask on';$('reqr').onclick=newQR;$('qr-refresh').disabled=false}
+  function poll(gen){if(gen!==QGEN)return;POLL=setTimeout(function(){if(gen!==QGEN)return;
+    fetch('/api/login/poll',{method:'POST',credentials:'same-origin'}).then(function(r){return r.json()}).then(function(j){
+      if(gen!==QGEN)return;
+      if(j.state==='scanned'){$('qr-mask').innerHTML='<div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12l5 5L20 7"/></svg>已扫码<br>请在手机上确认</div>';$('qr-mask').className='mask on'}
+      if(j.state==='confirmed'){stopQR();afterLogin();return}
+      if(j.state==='expired'||j.state==='canceled')return expired(gen);
+      poll(gen);
+    }).catch(function(){if(gen===QGEN)poll(gen)});
+  },1500)}
+  function bindProblem(msg){
+    show('s-info');$('info-tag').innerHTML='<i></i>绑定邀请码';$('info-title').textContent='绑定暂未完成';$('info-text').textContent='邀请码已保留，请重试绑定，或更换邀请码。';
+    $('info-who').innerHTML='';$('info-msg').textContent=msg||'网络异常，请重试';
+    $('info-acts').innerHTML='<button class="btn" id="retry-bind">重试绑定</button><button class="bind-change" id="change-code" type="button">更换邀请码</button>';
+    $('retry-bind').onclick=function(){afterLogin()};$('change-code').onclick=function(){rememberCode('');showCode()};
+  }
+  function afterLogin(){
+    LOGGED=true;
+    if(!CODE)return checkState();
+    var code=CODE,attempt=0;
+    if(!$('s-login').hidden)$('login-msg').textContent='正在绑定邀请码…';
+    function bind(){
+      return post('/api/invite/redeem',{code:code}).then(function(j){
+        if(code!==CODE)return;
+        if(j.ok){return post('/api/guest/import').then(function(m){if(!m.ok)throw new Error(m.error||'观看记录合并失败');rememberCode('');enter()}).catch(function(){bindProblem('账号已绑定，观看记录尚未合并，请重试')})}
+        if((j.needLogin||j._status>=500)&&attempt++<2)return new Promise(function(resolve){setTimeout(resolve,700)}).then(bind);
+        bindProblem(j.error||'绑定失败，请重试');
+      }).catch(function(){if(code===CODE)bindProblem('网络异常，请重试')});
+    }
+    return bind();
+  }
+  function checkState(){
+    var view=VIEW;
+    return post('/api/invite/state').then(function(j){
+      if(view!==VIEW)return;
+      if(j.browseOnly){rememberCode('');show('s-info');$('info-tag').innerHTML='<i></i>仅浏览';$('info-title').textContent='此邀请码仅用于浏览';$('info-text').textContent='观看记录只保存在当前浏览器，此邀请码不能绑定红果账号。';$('info-who').innerHTML='';$('info-msg').textContent='';$('info-acts').innerHTML='<button class="btn" id="browse-back">返回观看</button>';$('browse-back').onclick=enter;return}
+      if(j.guest&&j.code&&!CODE)rememberCode(j.code);
+      if(j.access)return enter();
+      if(!j.hongguo){if(CODE)startLogin();else show('s-start');return}
+      LOGGED=true;NAME=j.name||'';if(CODE)return afterLogin();needCode();
+    }).catch(function(){if(view===VIEW){if(CODE)startLogin();else show('s-start')}});
+  }
+  checkState();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>发送验证短信</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f4f6f2;color:#20241e;font:16px/1.55 system-ui,-apple-system,sans-serif}.wrap{max-width:460px;margin:auto;padding:30px 20px}h1{font-size:24px;margin:0 0 10px}p{color:#596256}.card{background:#fff;border-radius:18px;padding:18px;margin:18px 0}.row{margin:12px 0}.label{display:block;color:#687264;font-size:13px}.value{font-weight:650;word-break:break-all}.copy{margin-left:12px;border:0;background:none;color:#267439;font-size:14px}.open{display:block;width:100%;padding:14px;text-align:center;border:0;border-radius:12px;background:#39864b;color:#fff;font-size:17px;font-weight:650;text-decoration:none}.hint{font-size:14px}.error{color:#a02d2d}
+</style>
+</head>
+<body><main class="wrap">
+<h1>发送验证短信</h1><p>请使用登录红果的手机发送，发送后回到电脑点击“我已发送”。</p>
+<div id="details" hidden><div class="card"><div class="row"><span class="label">收件号码</span><span id="number" class="value"></span><button class="copy" type="button" data-copy="number">复制</button></div><div class="row"><span class="label">短信内容</span><span id="message" class="value"></span><button class="copy" type="button" data-copy="message">复制</button></div></div>
+<a class="open" id="open" href="#">打开短信</a><p class="hint">如果短信内容没有自动填入，请复制上方内容并粘贴。请核对号码和内容，手动点击发送。</p></div><p id="status" class="error" role="status"></p>
+</main><script>
+(function(){'use strict';
+var params=new URLSearchParams(location.hash.slice(1)),n=params.get('n')||'',m=params.get('m')||'',status=document.getElementById('status');
+if(!/^\+?[0-9]{5,20}$/.test(n)||!m||m.length>256||/[\x00-\x1f\x7f]/.test(m)){status.textContent='验证信息无效，请返回电脑重新获取二维码。';return;}
+document.getElementById('number').textContent=n;document.getElementById('message').textContent=m;document.getElementById('details').hidden=false;
+// iOS only guarantees the recipient in an SMS URL; retain a visible copy option.
+var ios=/iPad|iPhone|iPod/.test(navigator.userAgent),open=document.getElementById('open');open.href='sms:'+n+(ios?'':'?body='+encodeURIComponent(m));
+document.addEventListener('click',function(e){var b=e.target.closest('[data-copy]');if(!b)return;var text=b.dataset.copy==='number'?n:m;function done(){status.className='';status.textContent='已复制，可粘贴到短信中。'}function fail(){status.className='error';status.textContent='复制失败，请长按内容手动复制。'}if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(text).then(done,fail);else fail();});
+})();
+</script></body></html>

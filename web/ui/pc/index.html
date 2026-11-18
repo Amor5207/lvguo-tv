@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d1110">
+<meta name="color-scheme" content="light dark">
+<title>绿果WEB</title>
+<link rel="icon" type="image/png" href="/shared/favicon.png">
+<script>try{var m=JSON.parse(localStorage.getItem('lvguo.settings')||'{}').theme||'auto';var d=m==='dark'||(m==='auto'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.setAttribute('data-theme',d?'dark':'light')}catch(e){}</script>
+<link rel="stylesheet" href="/shared/tokens.css">
+<link rel="stylesheet" href="/pc/app.css">
+</head>
+<body>
+<div id="navbg" aria-hidden="true"></div>
+<header id="nav">
+  <a class="brand" href="/" aria-label="绿果WEB 首页"><img src="/shared/logo.png" alt=""><span>绿果<b>WEB</b></span></a>
+  <nav id="tabs" aria-label="主导航">
+    <i class="hl"></i>
+    <a data-tab="home" href="/">首页</a>
+    <a data-tab="feed" href="/feed">刷剧</a>
+    <a data-tab="rank" href="/rank">榜单</a>
+    <a data-tab="category" href="/category">分类</a>
+    <a data-tab="mine" href="/mine">我的</a>
+  </nav>
+  <div class="tools">
+    <button id="toSearch" class="nbtn" aria-label="搜索" title="搜索（/）"><svg class="icon"><use href="#i-search"/></svg></button>
+    <a id="toSet" class="nbtn" href="/settings" aria-label="设置" title="设置"><svg class="icon"><use href="#i-gear"/></svg></a>
+    <button id="acct" class="nbtn acct" aria-label="账号"></button>
+  </div>
+</header>
+<main id="view"></main>
+<div id="pop"></div>
+<div id="player" hidden></div>
+<div id="auth"></div>
+<script src="/shared/icons.js"></script>
+<script src="/shared/core.js"></script>
+<script src="/pc/app.js"></script>
+</body>
+</html>

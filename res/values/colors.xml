@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 只给窗口主题用（启动瞬间的底色）；界面配色在 Ui.java 的主题调色板里 -->
+    <color name="bg">#0B0E11</color>
+    <color name="primary">#C5ED8A</color>
+    <color name="text">#F5F7F8</color>
+    <color name="text_dim">#94A1AD</color>
+    <color name="launcher_background">#F1F8F2</color>
+</resources>
