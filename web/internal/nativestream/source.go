@@ -47,7 +47,7 @@ func OpenWithClient(ctx context.Context, url string, key []byte, client *http.Cl
 	}
 	lifetime, cancel := context.WithCancel(ctx)
 	s := &Source{ctx: lifetime, cancel: cancel, url: url, client: client, blocks: map[int64]*block{}}
-	head, total, err := s.fetch(0, 31)
+	head, total, err := s.fetch(0, 63)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -61,8 +61,12 @@ func OpenWithClient(ctx context.Context, url string, key []byte, client *http.Cl
 		var offset int64
 		found := false
 		for n := 0; n < 128 && offset+8 <= total; n++ {
-			h := head
-			if offset != 0 {
+			var h []byte
+			if offset+16 <= int64(len(head)) {
+				h = head[offset:]
+			} else if offset == 0 {
+				h = head
+			} else {
 				h, _, err = s.fetch(offset, min(total-1, offset+15))
 				if err != nil {
 					break
@@ -234,9 +238,13 @@ func (s *Source) ReadAt(p []byte, off int64) (int, error) {
 	return n, nil
 }
 func (s *Source) Warm() {
+	if s.Size <= 0 {
+		return
+	}
+	_, _ = s.loadBlock(0)
 	var wg sync.WaitGroup
 	maxBlock := (s.Size - 1) / blockSize
-	for i := int64(0); i < 3 && i <= maxBlock; i++ {
+	for i := int64(1); i < 3 && i <= maxBlock; i++ {
 		wg.Add(1)
 		go func(idx int64) {
 			defer wg.Done()
@@ -256,7 +264,7 @@ func (sr streamReader) ReadAt(p []byte, off int64) (int, error) {
 
 func (s *Source) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "video/mp4")
-	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Cache-Control", "private, max-age=600")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("ETag", strconv.Quote(strconv.FormatInt(s.Size, 10)))
 	http.ServeContent(w, r, "episode.mp4", time.Time{}, io.NewSectionReader(streamReader{s}, 0, s.Size))

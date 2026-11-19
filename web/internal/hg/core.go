@@ -42,6 +42,12 @@ const (
 var httpc = &http.Client{
 	Timeout:       25 * time.Second,
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	Transport: &http.Transport{
+		Proxy:               http.ProxyFromEnvironment,
+		MaxIdleConns:        128,
+		MaxIdleConnsPerHost: 32,
+		IdleConnTimeout:     90 * time.Second,
+	},
 }
 
 // Resp 是未经解析的响应，保留 Set-Cookie 与 Location。

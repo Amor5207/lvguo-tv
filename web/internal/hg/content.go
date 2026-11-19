@@ -233,9 +233,23 @@ func (c *Content) page(cookie, typ, board, filter string, offset int, session st
 	return p, sel, nil
 }
 
-// Rank 榜单一页。
+// Rank 榜单一页。前几页是公共高频数据（首页主视觉、首页热播榜、榜单首屏），短缓存避免重复请求上游。
 func (c *Content) Rank(cookie, board string, offset int, session string) (*Page, error) {
+	cacheKey := ""
+	if offset >= 0 && offset <= 30 {
+		cacheKey = "rank:" + board + ":" + strconv.Itoa(offset)
+		if v, ok := c.get(cacheKey); ok {
+			cp := *(v.(*Page))
+			cp.Items = append([]Series(nil), cp.Items...)
+			return &cp, nil
+		}
+	}
 	p, _, err := c.page(cookie, "all", board, "", offset, session)
+	if err == nil && p != nil && len(p.Items) > 0 && cacheKey != "" {
+		cp := *p
+		cp.Items = append([]Series(nil), p.Items...)
+		c.put(cacheKey, &cp, 3*time.Minute)
+	}
 	return p, err
 }
 
@@ -1273,20 +1287,31 @@ func fallbackCodecURL(raw, codec string) string {
 }
 
 func fetchCompatiblePlayFallback(raw string) (map[string]any, []byte, error) {
-	inner, seed, err := fetchPlayFallback(raw)
-	if err != nil {
-		return nil, nil, err
-	}
-	if hasPlayRows(inner["video_list"]) && !hasByteVC2Rows(inner["video_list"]) {
-		return inner, seed, nil
-	}
+	var lastInner map[string]any
+	var lastSeed []byte
+	var lastErr error
 	for _, codec := range []string{"codec_type=1", "codec_type=3", "codec_type=0&force_codec=h264"} {
 		candidate, cSeed, cErr := fetchPlayFallback(fallbackCodecURL(raw, codec))
 		if cErr == nil && hasPlayRows(candidate["video_list"]) && !onlyByteVC2Rows(candidate["video_list"]) {
 			return candidate, cSeed, nil
 		}
+		if cErr != nil {
+			lastErr = cErr
+		} else if hasPlayRows(candidate["video_list"]) {
+			lastInner, lastSeed = candidate, cSeed
+		}
 	}
-	return inner, seed, nil
+	inner, seed, err := fetchPlayFallback(raw)
+	if err == nil && hasPlayRows(inner["video_list"]) {
+		return inner, seed, nil
+	}
+	if lastInner != nil {
+		return lastInner, lastSeed, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, nil, lastErr
 }
 
 func fetchPlayFallback(raw string) (map[string]any, []byte, error) {

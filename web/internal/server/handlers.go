@@ -68,7 +68,7 @@ func (s *Server) me(ss *sess, w http.ResponseWriter, r *http.Request) (any, erro
 	if s.dev {
 		return view{"loggedIn": true, "daysLeft": 30, "profile": hg.Profile{UID: "1", Name: "绿果用户", Signature: "界面调试账号", WatchMs: 86400000, Days: 42}}, nil
 	}
-	p, err := ss.acct.Profile()
+	p, err := s.sessionProfile(ss)
 	if err != nil {
 		return nil, err
 	}
@@ -368,23 +368,38 @@ func (s *Server) detail(ss *sess, w http.ResponseWriter, r *http.Request) (any, 
 		var h []hg.Entry
 		var reservation *hg.Reservation
 		var wg sync.WaitGroup
-		wg.Add(3)
-		go func() { defer wg.Done(); fav, _ = ss.acct.Favorites() }()
+		wg.Add(2)
+		go func() { defer wg.Done(); fav, _ = s.sessionFavorites(ss, false) }()
 		go func() { defer wg.Done(); h, _ = s.cloudHistory(ss, 500) }()
-		go func() {
-			defer wg.Done()
-			for _, online := range []bool{false, true} {
-				if rs, err := ss.acct.Reservations(online); err == nil {
-					for _, rv := range rs {
-						if rv.SeriesID == d.ID {
-							found := rv
-							reservation = &found
-							return
+		// 已上线剧集（len(d.Episodes) > 0）前端不展示预约状态，仅待上线剧集才查预约
+		if len(d.Episodes) == 0 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				var rmu sync.Mutex
+				var rwg sync.WaitGroup
+				for _, online := range []bool{false, true} {
+					rwg.Add(1)
+					go func(online bool) {
+						defer rwg.Done()
+						if rs, err := ss.acct.Reservations(online); err == nil {
+							for _, rv := range rs {
+								if rv.SeriesID == d.ID {
+									found := rv
+									rmu.Lock()
+									if reservation == nil {
+										reservation = &found
+									}
+									rmu.Unlock()
+									return
+								}
+							}
 						}
-					}
+					}(online)
 				}
-			}
-		}()
+				rwg.Wait()
+			}()
+		}
 		wg.Wait()
 		{
 			for _, f := range fav {
@@ -474,7 +489,7 @@ func (s *Server) favorites(ss *sess, w http.ResponseWriter, r *http.Request) (an
 	if s.dev {
 		return view{"items": []hg.Entry{}}, nil
 	}
-	f, err := ss.acct.Favorites()
+	f, err := s.sessionFavorites(ss, true)
 	if err != nil {
 		return nil, err
 	}
@@ -503,6 +518,7 @@ func (s *Server) favorite(ss *sess, w http.ResponseWriter, r *http.Request) (any
 	if err := ss.acct.SetFavorite(in.ID, in.Add); err != nil {
 		return nil, err
 	}
+	s.invalidateFavorites(ss)
 	return view{"ok": true, "favorite": in.Add}, nil
 }
 

@@ -423,7 +423,7 @@
     window.addEventListener('lv:history', historyChanged); window.addEventListener('lv:progress', historyChanged);
     cleanups.push(function () { window.removeEventListener('lv:history', historyChanged); window.removeEventListener('lv:progress', historyChanged); });
     if (hist.length) updateContinue(hist);
-    if (LV.loggedIn || GUEST) loadHistory(true);
+    if (LV.loggedIn || GUEST) loadHistory(historyLoaded);
     if (cached && cached.length >= 6) paint(cached);
     if (cachedHero && cachedHero.length) paintHero(cachedHero);
     else boardItems(HERO_BOARD, 5).then(function (list) {
@@ -431,6 +431,15 @@
       if (!list.length) { hero.remove(); return; }
       var picks = list.slice(0, 5).map(slim); persist('hero.' + HERO_BOARD, picks); paintHero(picks);
     }).catch(function () { if (!cachedHero && hero.isConnected) { hero.remove(); hasHero = false; onScroll(); } });
+    // 热播榜（一排）：先用本地缓存，与 /api/home 并行后台刷新，不阻塞在 /api/home 之后
+    var hot = $('#hot', root), hrow = $('.row', hot), hk = 'b.' + HOME_BOARD, hhit = persist(hk), hdrawn = false;
+    function hdraw(list) { hrow.innerHTML = list.map(function (s, i) { return card(s, { rank: i + 1, i: i }); }).join(''); arrState(hrow); hdrawn = true; }
+    if (hhit && hhit.length >= 6) { remember(hhit); hdraw(hhit); }
+    boardItems(HOME_BOARD, 12).then(function (list) {
+      if (!root.isConnected || !isHomePath()) return;
+      if (list.length >= 6) persist(hk, list.map(slim));
+      if (!hdrawn) { if (list.length < 6) hot.remove(); else hdraw(list); }
+    }).catch(function () { if (!hdrawn && hot.isConnected) hot.remove(); });
     var data; try { data = await api('/api/home', { ttl: 0 }); } catch (e) {
       if (!shown && !cachedHero) { hero.remove(); hasHero = false; $('.shelves', root).innerHTML = '<div style="padding-top:var(--nav)">' + failed(e.message) + '</div>'; onScroll(); return; }
       data = { forYou: { items: shown, next: -1, more: false }, continue: [], channels: [], cell: '', session: '' };
@@ -442,14 +451,6 @@
     if (items.length && (!shown || shown.map(function (x) { return x.id; }).join() !== items.map(function (x) { return x.id; }).join())) paint(items);
     remember(data.continue.map(function (c) { return { id: c.seriesId, title: c.title, cover: c.cover, episodes: c.episodeCount }; }));
     if (!historyLoaded) { hist = mergeRecentHistory(data.continue || []); updateContinue(hist); }
-    // 热播榜（一排）：先用本地缓存，再后台刷新
-    var hot = $('#hot', root), hrow = $('.row', hot), hk = 'b.' + HOME_BOARD, hhit = persist(hk), hdrawn = false;
-    function hdraw(list) { hrow.innerHTML = list.map(function (s, i) { return card(s, { rank: i + 1, i: i }); }).join(''); arrState(hrow); hdrawn = true; }
-    if (hhit && hhit.length >= 6) { remember(hhit); hdraw(hhit); }
-    boardItems(HOME_BOARD, 12).then(function (list) {
-      if (list.length >= 6) persist(hk, list.map(slim));
-      if (!hdrawn) { if (list.length < 6) hot.remove(); else hdraw(list); }
-    }).catch(function () { if (!hdrawn) hot.remove(); });
     // 为你推荐：接口每页只有 6 部、约 1 秒 → 后台预取攒到缓冲区，每次按整行追加（至少两行），不再一张张往外冒
     function cols() { var t = getComputedStyle(fy).gridTemplateColumns; return t && t !== 'none' ? t.split(' ').length : 6; }
     var inf = null, feedGen = 0, sent = $('#sent', root);
@@ -1074,7 +1075,7 @@
     document.addEventListener('keydown',key);window.addEventListener('popstate',pop);el.addEventListener('click',click);
     function fetchDetail(){
       var n=++state.request,old=$('.perr',el);if(old)old.remove();$('.pload',el).classList.remove('hide');
-      api('/api/detail',{query:{id:id},ttl:TTL}).then(function(r){
+      api('/api/detail',{query:{id:id,lite:(historyLoaded||progressOf(id))?'1':undefined},ttl:TTL}).then(function(r){
         if(OPENING!==state||n!==state.request)return;
         if(!r.detail||!r.detail.episodes||!r.detail.episodes.length)throw new Error('暂无可播放的剧集');
         var p=latestProgress(id,r.progress);OPENING=null;detach();openPlayer(r.detail,p?p.episodeIndex:0,p?p.positionMs:0,true);
@@ -1593,18 +1594,7 @@
           S.start = 0;
         }
         var p = v.play(); if (p && p.catch) p.catch(function (er) { if (tk !== S.token) return; if (er && er.name === 'NotAllowedError') { presentVideo(nv, tk); ppIcon('play'); $('.pload', el).classList.add('hide'); el.classList.add('ready', 'paused'); } else if (!er || er.name !== 'AbortError') autoRecover(tk); });
-        // 非刷剧模式在当前集开始播放请求后就立刻预热下一集，不再苦等首帧后再延迟 1.2 秒
-        if (!feed && i + 1 < d.episodes.length) {
-          clearTimeout(S.preT);
-          S.preT = setTimeout(function () {
-            if (PL !== S || S.i !== i || S.token !== tk) return;
-            var nxt = prepare(i + 1);
-            if (nxt && i + 2 < d.episodes.length) nxt.then(function () {
-              if (PL === S && S.i === i && S.token === tk) prewarm(d.episodes[i + 2].vid, S.quality);
-            }).catch(function () {});
-          }, 120);
-        }
-        // 真正开始播放后才上报进度/历史：只是打开、或加载失败，不写进云端观看历史
+        // 真正开始播放后才上报进度/历史并预热下一集（见 on.playing），避免当前集首帧未出时下一集抢占带宽
         var vv = v; S.report = function () { S.report = null; if (tk === S.token) { S.reportStarted = true; rep.start(d.id, ep.vid, i, function () { return vv.currentTime; }, {title:d.title,cover:d.cover,episodeCount:d.episodes.length}); } };
         dm.fetch(d.id, ep.vid, ep.duration).then(function () { S.cmLoading = false; if (tk === S.token) { dm.seek(v.currentTime || 0); if (S.tab === 'cm' && el.classList.contains('dock-on')) drawDock(); } });
       } catch (e) { if (tk === S.token) autoRecover(tk); }
@@ -2065,7 +2055,7 @@
     }
     LV.loggedIn = !!me.loggedIn; renderAcct();
     if (me.loggedIn && me.hasGuest) api('/api/guest/import', {body:{}}).then(function () { loadHistory(true); }).catch(function () { LV.toast('临时观看记录合并未完成，稍后会重试'); });
-    if (me.loggedIn || GUEST) loadHistory();
+    if ((me.loggedIn || GUEST) && !isHomePath()) loadHistory();
     setInterval(function () {
       if (!document.hidden && (GUEST || BROWSE_ONLY || LV.loggedIn)) {
         fetch('/api/ping', { credentials: 'same-origin' }).catch(function () {});

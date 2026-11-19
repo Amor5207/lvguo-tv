@@ -53,6 +53,11 @@ type sess struct {
 	uid        string   // 红果账号 id 缓存（邀请制核对用），随 cookie 变化失效
 	uidName    string
 	uidJar     string
+	profile    *hg.Profile
+	profileAt  time.Time
+	favs       []hg.Entry
+	favsAt     time.Time
+	favsJar    string
 	guestCode  string
 }
 
@@ -331,6 +336,11 @@ func (s *Server) expire(ss *sess) {
 	_ = os.Remove(s.libraryPath(ss.id))
 	s.mu.Lock()
 	ss.lib = nil
+	ss.profile = nil
+	ss.profileAt = time.Time{}
+	ss.favs = nil
+	ss.favsAt = time.Time{}
+	ss.favsJar = ""
 	hadDev := ss.acct.HasDev()
 	ss.acct.SetDev(nil)
 	s.mu.Unlock()
@@ -558,8 +568,60 @@ func (s *Server) hongguoIdentity(r *http.Request) (string, string) {
 	if err != nil || p == nil || p.UID == "" {
 		return "", ""
 	}
+	cp := *p
 	s.mu.Lock()
 	ss.uid, ss.uidName, ss.uidJar = p.UID, p.Name, jar
+	ss.profile, ss.profileAt = &cp, time.Now()
 	s.mu.Unlock()
 	return p.UID, p.Name
+}
+
+func (s *Server) sessionProfile(ss *sess) (*hg.Profile, error) {
+	jar := ss.acct.U.Cookie()
+	s.mu.Lock()
+	if ss.profile != nil && ss.uidJar == jar && time.Since(ss.profileAt) < 2*time.Minute {
+		cp := *ss.profile
+		s.mu.Unlock()
+		return &cp, nil
+	}
+	s.mu.Unlock()
+	p, err := ss.acct.Profile()
+	if err != nil || p == nil {
+		return nil, err
+	}
+	cp := *p
+	s.mu.Lock()
+	ss.uid, ss.uidName, ss.uidJar = p.UID, p.Name, jar
+	ss.profile, ss.profileAt = &cp, time.Now()
+	s.mu.Unlock()
+	return p, nil
+}
+
+func (s *Server) sessionFavorites(ss *sess, fresh bool) ([]hg.Entry, error) {
+	jar := ss.acct.U.Cookie()
+	s.mu.Lock()
+	if !fresh && ss.favs != nil && ss.favsJar == jar && time.Since(ss.favsAt) < 30*time.Second {
+		cp := append([]hg.Entry(nil), ss.favs...)
+		s.mu.Unlock()
+		return cp, nil
+	}
+	s.mu.Unlock()
+	f, err := ss.acct.Favorites()
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	ss.favs = append([]hg.Entry(nil), f...)
+	ss.favsAt = time.Now()
+	ss.favsJar = jar
+	s.mu.Unlock()
+	return f, nil
+}
+
+func (s *Server) invalidateFavorites(ss *sess) {
+	s.mu.Lock()
+	ss.favs = nil
+	ss.favsAt = time.Time{}
+	ss.favsJar = ""
+	s.mu.Unlock()
 }
