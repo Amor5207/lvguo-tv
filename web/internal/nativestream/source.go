@@ -19,6 +19,7 @@ const blockSize int64 = 512 << 10
 const maxBlocks = 40
 const maxIndex = 16 << 20
 const prefetchBlocks = 3
+const fetchAttemptTimeout = 5 * time.Second
 
 type block struct {
 	done chan struct{}
@@ -27,27 +28,49 @@ type block struct {
 	at   time.Time
 }
 type Source struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	url    string
-	client *http.Client
-	Size   int64
-	index  *cenc.Index
-	mu     sync.Mutex
-	blocks map[int64]*block
+	ctx        context.Context
+	cancel     context.CancelFunc
+	url        string
+	urls       []string
+	client     *http.Client
+	ownsClient bool
+	Size       int64
+	head       []byte
+	index      *cenc.Index
+	mu         sync.Mutex
+	blocks     map[int64]*block
 }
 
 func Open(ctx context.Context, url string, key []byte) (*Source, error) {
-	return OpenWithClient(ctx, url, key, &http.Client{Timeout: 20 * time.Second})
+	return openURLs(ctx, []string{url}, key, &http.Client{Timeout: 20 * time.Second}, true)
 }
 
 func OpenWithClient(ctx context.Context, url string, key []byte, client *http.Client) (*Source, error) {
-	if !strings.HasPrefix(url, "https://") {
+	return OpenURLsWithClient(ctx, []string{url}, key, client)
+}
+
+func OpenURLsWithClient(ctx context.Context, urls []string, key []byte, client *http.Client) (*Source, error) {
+	return openURLs(ctx, urls, key, client, false)
+}
+
+func openURLs(ctx context.Context, urls []string, key []byte, client *http.Client, ownsClient bool) (*Source, error) {
+	valid := make([]string, 0, len(urls))
+	for _, u := range urls {
+		u = strings.TrimSpace(u)
+		if strings.HasPrefix(u, "https://") {
+			valid = append(valid, u)
+		}
+	}
+	if len(valid) == 0 {
 		return nil, errors.New("视频地址必须使用 HTTPS")
 	}
 	lifetime, cancel := context.WithCancel(ctx)
-	s := &Source{ctx: lifetime, cancel: cancel, url: url, client: client, blocks: map[int64]*block{}}
-	head, total, err := s.fetch(0, 63)
+	s := &Source{ctx: lifetime, cancel: cancel, url: valid[0], urls: valid, client: client, ownsClient: ownsClient, blocks: map[int64]*block{}}
+	fetchEnd := int64(63)
+	if len(key) > 0 {
+		fetchEnd = blockSize - 1
+	}
+	head, total, err := s.fetch(0, fetchEnd)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -57,15 +80,16 @@ func OpenWithClient(ctx context.Context, url string, key []byte, client *http.Cl
 		cancel()
 		return nil, errors.New("视频内容为空")
 	}
+	s.head = append([]byte(nil), head[:min(len(head), 64)]...)
 	if len(key) > 0 {
 		var offset int64
 		found := false
 		for n := 0; n < 128 && offset+8 <= total; n++ {
 			var h []byte
 			if offset+16 <= int64(len(head)) {
+				h = head[offset : offset+16]
+			} else if offset < int64(len(head)) {
 				h = head[offset:]
-			} else if offset == 0 {
-				h = head
 			} else {
 				h, _, err = s.fetch(offset, min(total-1, offset+15))
 				if err != nil {
@@ -97,7 +121,11 @@ func OpenWithClient(ctx context.Context, url string, key []byte, client *http.Cl
 					break
 				}
 				var data []byte
-				data, _, err = s.fetch(offset, offset+size-1)
+				if offset+size <= int64(len(head)) {
+					data = head[offset : offset+size]
+				} else {
+					data, _, err = s.fetch(offset, offset+size-1)
+				}
 				if err == nil {
 					s.index, err = cenc.NewIndex(data, offset, key)
 				}
@@ -113,12 +141,46 @@ func OpenWithClient(ctx context.Context, url string, key []byte, client *http.Cl
 			}
 			return nil, err
 		}
+		want0 := min(total, blockSize)
+		if int64(len(head)) == want0 && s.index != nil {
+			block0 := append([]byte(nil), head...)
+			if err := s.index.Transform(block0, 0); err == nil {
+				b := &block{done: make(chan struct{}), data: block0, at: time.Now()}
+				close(b.done)
+				s.blocks[0] = b
+				s.head = append([]byte(nil), block0[:min(len(block0), 64)]...)
+			}
+		}
 	}
 	return s, nil
 }
-func (s *Source) Close() { s.cancel(); s.client.CloseIdleConnections() }
+func (s *Source) Close() {
+	s.cancel()
+	if s.ownsClient && s.client != nil {
+		s.client.CloseIdleConnections()
+	}
+}
 func (s *Source) fetch(start, end int64) ([]byte, int64, error) {
-	req, err := http.NewRequestWithContext(s.ctx, "GET", s.url, nil)
+	var lastErr error
+	for _, u := range s.urls {
+		if s.ctx.Err() != nil {
+			return nil, 0, s.ctx.Err()
+		}
+		data, total, err := s.fetchOnce(u, start, end)
+		if err == nil {
+			return data, total, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = errors.New("没有可用的视频源地址")
+	}
+	return nil, 0, lastErr
+}
+func (s *Source) fetchOnce(u string, start, end int64) ([]byte, int64, error) {
+	ctx, cancel := context.WithTimeout(s.ctx, fetchAttemptTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -218,6 +280,9 @@ func (s *Source) ReadAt(p []byte, off int64) (int, error) {
 	if off >= s.Size {
 		return 0, io.EOF
 	}
+	if int64(len(p)) <= 16 && off+int64(len(p)) <= int64(len(s.head)) {
+		return copy(p, s.head[off:]), nil
+	}
 	n := 0
 	for n < len(p) && off < s.Size {
 		data, err := s.get(off / blockSize)
@@ -256,7 +321,7 @@ func (s *Source) Warm() {
 type streamReader struct{ s *Source }
 
 func (sr streamReader) ReadAt(p []byte, off int64) (int, error) {
-	if off >= 0 && off < sr.s.Size {
+	if off >= 0 && off < sr.s.Size && len(p) > 16 {
 		sr.s.prefetchAhead(off / blockSize)
 	}
 	return sr.s.ReadAt(p, off)

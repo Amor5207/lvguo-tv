@@ -678,6 +678,7 @@ func (s *Server) play(ss *sess, w http.ResponseWriter, r *http.Request) (any, er
 	vid := q(r, "vid")
 	if q(r, "fresh") == "1" {
 		s.content.ForgetPlay(vid)
+		s.media.Forget(vid)
 	}
 	gears, err := s.content.Play(s.player, vid)
 	if err != nil {

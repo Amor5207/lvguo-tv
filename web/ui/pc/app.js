@@ -208,7 +208,9 @@
   document.addEventListener('click', function (e) { if (!e.target.closest('.menu,#acct')) closeMenu(); });
   async function logout() {
     if (!(await confirmBox('退出登录？', '退出后需重新登录红果账号。', '退出登录', true))) return;
-    try { await api('/api/logout', { body: {} }); } catch (e) {} location.reload();
+    try { await api('/api/logout', { body: {} }); } catch (e) {}
+    persist('me', { loggedIn: false }, 7 * 86400e3); persist('hist', [], 7 * 86400e3);
+    location.reload();
   }
   document.addEventListener('keydown', function (e) {
     if ((e.key === '/' || (e.key === 'k' && (e.metaKey || e.ctrlKey))) && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) && !PL) {
@@ -311,13 +313,22 @@
     var sn = e.target.closest('[data-soon]'); if (sn) return soonPopup(sn.dataset.soon);
     var el = e.target.closest('[data-id]'); if (el) openDetail(el.dataset.id, el);
   });
-  // 悬停预取详情：点开时数据已在缓存里
+  // 悬停预取详情与播放源：点开时数据已在缓存里
   var warmT = 0;
   view.addEventListener('pointerover', function (e) {
-    var c = e.target.closest('[data-id],[data-cw]'); if (!c || c.contains(e.relatedTarget)) return;
-    clearTimeout(warmT); var id = c.dataset.id || c.dataset.cw;
-    warmT = setTimeout(function () { api('/api/detail', { query: { id: id }, ttl: TTL }).catch(function () {}); }, 160);
+    var c = e.target.closest('[data-id],[data-cw],[data-play]'); if (!c || c.contains(e.relatedTarget)) return;
+    clearTimeout(warmT); var id = c.dataset.id || c.dataset.cw || c.dataset.play, isDirect = !!(c.dataset.cw || c.dataset.play);
+    warmT = setTimeout(function () {
+      if (PL || OPENING) return;
+      var p = progressOf(id), lite = (isDirect && (historyLoaded || p)) ? '1' : undefined;
+      api('/api/detail', { query: { id: id, lite: lite }, ttl: TTL }).catch(function () {});
+      var vid = (p && p.vid) || (cache[id] && cache[id].firstVid) || '';
+      if (vid) playInfo(vid, LV.get('quality')).catch(function () {});
+    }, 120);
   });
+  function saveCachedHist() {
+    if (!BROWSE_ONLY && (LV.loggedIn || GUEST)) persist('hist', hist.slice(0, 24), 7 * 86400e3);
+  }
   function mergeRecentHistory(cloud) {
     var by = new Map(); (cloud || []).forEach(function (e) { if (e && e.seriesId && (!by.has(e.seriesId) || (e.time || 0) >= (by.get(e.seriesId).time || 0))) by.set(e.seriesId, e); });
     recentPlayback.forEach(function (e, id) {
@@ -327,7 +338,7 @@
     });
     return Array.from(by.values()).sort(function (a, b) { return (b.time || 0) - (a.time || 0); });
   }
-  async function loadHistory(fresh) { if (!LV.loggedIn && !GUEST) return hist; var request = ++historyRequest; try { var rows = BROWSE_ONLY ? readBrowseHistory() : (await api(fresh === true ? '/api/history?fresh=1' : '/api/history')).items || []; if (request !== historyRequest) return hist; hist = mergeRecentHistory(rows); historyLoaded = true; window.dispatchEvent(new CustomEvent('lv:history', { detail: hist })); } catch (e) {} return hist; }
+  async function loadHistory(fresh) { if (!LV.loggedIn && !GUEST) return hist; var request = ++historyRequest; try { var rows = BROWSE_ONLY ? readBrowseHistory() : (await api(fresh === true ? '/api/history?fresh=1' : '/api/history')).items || []; if (request !== historyRequest) return hist; hist = mergeRecentHistory(rows); historyLoaded = true; saveCachedHist(); window.dispatchEvent(new CustomEvent('lv:history', { detail: hist })); } catch (e) {} return hist; }
   function progressOf(id) { return hist.find(function (h) { return h.seriesId === id; }); }
   function latestProgress(id, supplied) { var local = progressOf(id); return local && (!supplied || (local.time || 0) >= (supplied.time || 0)) ? local : supplied; }
   function playSeries(id) { openSeriesLoader(id); }
@@ -423,7 +434,7 @@
     window.addEventListener('lv:history', historyChanged); window.addEventListener('lv:progress', historyChanged);
     cleanups.push(function () { window.removeEventListener('lv:history', historyChanged); window.removeEventListener('lv:progress', historyChanged); });
     if (hist.length) updateContinue(hist);
-    if (LV.loggedIn || GUEST) loadHistory(historyLoaded);
+    if (BROWSE_ONLY) loadHistory(false);
     if (cached && cached.length >= 6) paint(cached);
     if (cachedHero && cachedHero.length) paintHero(cachedHero);
     else boardItems(HERO_BOARD, 5).then(function (list) {
@@ -431,6 +442,19 @@
       if (!list.length) { hero.remove(); return; }
       var picks = list.slice(0, 5).map(slim); persist('hero.' + HERO_BOARD, picks); paintHero(picks);
     }).catch(function () { if (!cachedHero && hero.isConnected) { hero.remove(); hasHero = false; onScroll(); } });
+    // 预热首部最可能被点击的剧集（继续观看第 1 部或主视觉第 1 部），点击播放时详情与视频流已在缓存中
+    var warmFirstTimer = setTimeout(function () {
+      if (PL || OPENING || !root.isConnected || !isHomePath()) return;
+      var top = hist[0];
+      if (top && top.seriesId) {
+        api('/api/detail', { query: { id: top.seriesId, lite: '1' }, ttl: TTL }).catch(function () {});
+        if (top.vid) playInfo(top.vid, LV.get('quality')).catch(function () {});
+      } else if (cachedHero && cachedHero[0] && cachedHero[0].id) {
+        api('/api/detail', { query: { id: cachedHero[0].id, lite: '1' }, ttl: TTL }).catch(function () {});
+        if (cachedHero[0].firstVid) playInfo(cachedHero[0].firstVid, LV.get('quality')).catch(function () {});
+      }
+    }, 180);
+    cleanups.push(function () { clearTimeout(warmFirstTimer); });
     // 热播榜（一排）：先用本地缓存，与 /api/home 并行后台刷新，不阻塞在 /api/home 之后
     var hot = $('#hot', root), hrow = $('.row', hot), hk = 'b.' + HOME_BOARD, hhit = persist(hk), hdrawn = false;
     function hdraw(list) { hrow.innerHTML = list.map(function (s, i) { return card(s, { rank: i + 1, i: i }); }).join(''); arrState(hrow); hdrawn = true; }
@@ -450,7 +474,10 @@
     // 首页「为你推荐」可随会话更新；主视觉独立使用推荐榜持久缓存。
     if (items.length && (!shown || shown.map(function (x) { return x.id; }).join() !== items.map(function (x) { return x.id; }).join())) paint(items);
     remember(data.continue.map(function (c) { return { id: c.seriesId, title: c.title, cover: c.cover, episodes: c.episodeCount }; }));
-    if (!historyLoaded) { hist = mergeRecentHistory(data.continue || []); updateContinue(hist); }
+    if (!BROWSE_ONLY && (LV.loggedIn || GUEST)) {
+      hist = historyLoaded ? mergeRecentHistory((data.continue || []).concat(hist)) : mergeRecentHistory(data.continue || []);
+      saveCachedHist(); updateContinue(hist);
+    }
     // 为你推荐：接口每页只有 6 部、约 1 秒 → 后台预取攒到缓冲区，每次按整行追加（至少两行），不再一张张往外冒
     function cols() { var t = getComputedStyle(fy).gridTemplateColumns; return t && t !== 'none' ? t.split(' ').length : 6; }
     var inf = null, feedGen = 0, sent = $('#sent', root);
@@ -487,7 +514,7 @@
         return pending;
       }
       function live() { return gen === feedGen && root.isConnected; }
-      function prefetch() { var c = cols(); (function go() { if (buf.length < c * 3 && more && live()) fetchPage().then(go); })(); }
+      function prefetch() { var c = cols(); (function go() { if (PL || OPENING) return; if (buf.length < c * 3 && more && live()) fetchPage().then(go); })(); }
       if (inf) inf.stop();
       sent.hidden = false;
       inf = LV.infinite(sent, async function () {
@@ -532,9 +559,9 @@
     if (chs.length > 1) {
       chBox.innerHTML = chs.map(function (c) { return '<button class="chip' + (c.id === curCh ? ' on' : '') + '" data-ch="' + esc(c.id) + '">' + esc(c.label) + '</button>'; }).join('');
       var warmTimer = setTimeout(function () {
-        if (!root.isConnected || !isHomePath()) return;
+        if (!root.isConnected || !isHomePath() || PL || OPENING) return;
         chs.forEach(function (c) { if (c.id !== '16') fetchChannelFirst(c.id).catch(function () {}); });
-      }, 450);
+      }, 1200);
       cleanups.push(function () { clearTimeout(warmTimer); });
       chBox.addEventListener('click', function (e) {
         var b = e.target.closest('[data-ch]'); if (!b) return;
@@ -773,7 +800,8 @@
   function epSk(n) { return Array.from({ length: n }, function () { return '<div class="epn sk skel"></div>'; }).join(''); }
   function epTabs(G, gi, attr) { return G.length > 1 ? '<div class="eptabs">' + G.map(function (g, i) { return '<button class="' + (i === gi ? 'on' : '') + '" ' + attr + '="' + i + '">' + g[0] + '–' + g[1] + '</button>'; }).join('') + '</div>' : ''; }
   async function detail(id) {
-    var s = cache[id] || {}; title(s.title || '');
+    var s = cache[id] || {}, p0 = progressOf(id), warmVid0 = (p0 && p0.vid) || s.firstVid || ''; title(s.title || '');
+    if (warmVid0) playInfo(warmVid0, LV.get('quality')).catch(function () {});
     var root = mount('<div class="dpage"><button class="dback" data-back>' + ic('back') + '<span>返回</span></button><section class="dhead"><div class="dglow">' + (s.cover ? LV.img(s.cover, '', 200, true) : '') + '</div><div class="dposter poster">' + (s.cover ? LV.img(s.cover, s.title, 600, true) : '') + '</div>' +
       '<div class="dinfo">' + (s.title ? '<h1>' + esc(s.title) + '</h1>' : '<div class="skel" style="width:60%;height:44px"></div>') + '<div class="skel t" style="width:40%;margin-top:22px"></div><div class="skel t" style="width:92%;margin-top:22px"></div><div class="skel t" style="width:86%;margin-top:12px"></div><div class="skel t s" style="margin-top:12px"></div><div class="skel" style="width:190px;height:48px;border-radius:99px;margin-top:30px"></div></div></section>' +
       '<section class="dsec"><div class="sh2"><h2>选集</h2></div><div class="epg">' + epSk(30) + '</div></section></div>');
@@ -802,9 +830,8 @@
         : '<button class="btn primary lg" data-act="play">' + ic('play2') + (prog ? '继续观看 第 ' + (cur + 1) + ' 集' : '播放第 1 集') + '</button>') +
       '<button class="btn lg' + (fav ? ' faved' : '') + '" data-act="fav">' + ic(fav ? 'heartfill' : 'heart') + '<span>' + (fav ? '已收藏' : '收藏') + '</span></button></div>';
     var di = $('.dintro.clamp', root); if (di) { var p = $('p', di); if (p.scrollHeight <= p.clientHeight + 2) { di.classList.remove('clamp'); $('.more2', di).remove(); } }
-    var warmed = false;
-    var openingWarm = setTimeout(function () { if (!PL && root.isConnected && d.episodes[Math.max(0, cur)]) { warmed = true; prewarm(d.episodes[Math.max(0, cur)].vid); } }, 350);
-    cleanups.push(function () { clearTimeout(openingWarm); });
+    var warmed = false, targetEp = d.episodes[Math.max(0, cur)];
+    if (!PL && targetEp) { warmed = true; playInfo(targetEp.vid, LV.get('quality')).catch(function () {}); }
     $('.dhead', root).addEventListener('pointerover', function (e) { if (!warmed && e.target.closest('[data-act=play]') && d.episodes[Math.max(0, cur)]) { warmed = true; prewarm(d.episodes[Math.max(0, cur)].vid); } });
     $('.dhead', root).addEventListener('click', function (e) {
       var a = e.target.closest('[data-act]'); if (!a) return;
@@ -983,6 +1010,7 @@
       c.style.transition = 'transform .45s var(--ease),opacity .3s'; c.style.transform = 'scale(.85)'; c.style.opacity = 0;
       setTimeout(function () { var row = c.parentNode; c.remove(); if (row && row.classList.contains('row')) arrState(row); }, 360);
       hist = hist.filter(function (h) { return h.seriesId !== id; });
+      saveCachedHist();
       if (mineRemoved) setTimeout(function () { if (mineRemoved) mineRemoved(id, isHist); }, 380);
       LV.toast(isHist ? '已删除' : '已取消收藏');
     } catch (e) { LV.toast(e.message); }
@@ -1075,7 +1103,9 @@
     document.addEventListener('keydown',key);window.addEventListener('popstate',pop);el.addEventListener('click',click);
     function fetchDetail(){
       var n=++state.request,old=$('.perr',el);if(old)old.remove();$('.pload',el).classList.remove('hide');
-      api('/api/detail',{query:{id:id,lite:(historyLoaded||progressOf(id))?'1':undefined},ttl:TTL}).then(function(r){
+      var p0=progressOf(id),warmVid=(p0&&p0.vid)||(info&&info.firstVid)||'';
+      if(warmVid)playInfo(warmVid,LV.get('quality')).catch(function(){});
+      api('/api/detail',{query:{id:id,lite:(historyLoaded||p0)?'1':undefined},ttl:TTL}).then(function(r){
         if(OPENING!==state||n!==state.request)return;
         if(!r.detail||!r.detail.episodes||!r.detail.episodes.length)throw new Error('暂无可播放的剧集');
         var p=latestProgress(id,r.progress);OPENING=null;detach();openPlayer(r.detail,p?p.episodeIndex:0,p?p.positionMs:0,true);
@@ -1295,6 +1325,7 @@
         episodeCount: d.episodes.length, time: Date.now() });
       recentPlayback.set(d.id, saved);
       hist = [saved].concat(hist.filter(function (x) { return x.seriesId !== d.id; }));
+      saveCachedHist();
       window.dispatchEvent(new CustomEvent('lv:progress', { detail: saved }));
       return saved;
     }
@@ -1513,7 +1544,7 @@
     $('.dock', el).addEventListener('click', function (e) {
       var t = e.target.closest('[data-dt]'), g = e.target.closest('[data-gi]'), b = e.target.closest('[data-ep]'), m = e.target.closest('[data-cmmore]'), se = e.target.closest('[data-season]');
       if (se && !se.disabled) return switchSeason(se.dataset.season);
-      if (t) { S.tab = t.dataset.dt; drawDock(); } else if (g) { S.gi = +g.dataset.gi; drawDock(); } else if (b) selectEpisode(+b.dataset.ep); else if (m) { S.cmN += 30; drawDock(); }
+      if (t) { S.tab = t.dataset.dt; if (S.tab === 'cm' && S.loadComments) S.loadComments(); drawDock(); } else if (g) { S.gi = +g.dataset.gi; drawDock(); } else if (b) selectEpisode(+b.dataset.ep); else if (m) { S.cmN += 30; drawDock(); }
     });
 
     // 切集先保留旧帧，等新视频实际呈现首帧后再交接；刷剧切剧则立刻执行纵向滑动转场。
@@ -1594,9 +1625,10 @@
           S.start = 0;
         }
         var p = v.play(); if (p && p.catch) p.catch(function (er) { if (tk !== S.token) return; if (er && er.name === 'NotAllowedError') { presentVideo(nv, tk); ppIcon('play'); $('.pload', el).classList.add('hide'); el.classList.add('ready', 'paused'); } else if (!er || er.name !== 'AbortError') autoRecover(tk); });
-        // 真正开始播放后才上报进度/历史并预热下一集（见 on.playing），避免当前集首帧未出时下一集抢占带宽
+        // 真正开始播放后才上报进度/历史、拉取弹幕评论并预热下一集（见 on.playing），避免当前集首帧未出时其它请求抢占连接和带宽
         var vv = v; S.report = function () { S.report = null; if (tk === S.token) { S.reportStarted = true; rep.start(d.id, ep.vid, i, function () { return vv.currentTime; }, {title:d.title,cover:d.cover,episodeCount:d.episodes.length}); } };
-        dm.fetch(d.id, ep.vid, ep.duration).then(function () { S.cmLoading = false; if (tk === S.token) { dm.seek(v.currentTime || 0); if (S.tab === 'cm' && el.classList.contains('dock-on')) drawDock(); } });
+        S.loadComments = function () { S.loadComments = null; dm.fetch(d.id, ep.vid, ep.duration).then(function () { S.cmLoading = false; if (tk === S.token) { dm.seek(v.currentTime || 0); if (S.tab === 'cm' && el.classList.contains('dock-on')) drawDock(); } }); };
+        if (S.tab === 'cm' && el.classList.contains('dock-on')) S.loadComments();
       } catch (e) { if (tk === S.token) autoRecover(tk); }
     }
     function autoRecover(tk) {
@@ -1659,7 +1691,7 @@
       },
       playing: function () {
         clearTimeout(S.recovery.stall); clearTimeout(S.loadingTimer);
-        watchDrops(S.token); if (S.report) S.report(); presentFirstFrame();
+        watchDrops(S.token); if (S.report) S.report(); if (S.loadComments) S.loadComments(); presentFirstFrame();
         el.classList.remove('paused'); ppIcon('pause'); dm.setPlaying(true);
         clearTimeout(S.recovery.stable); var stableToken = S.token;
         S.recovery.stable = setTimeout(function () { if (PL === S && S.token === stableToken) { S.recovery.attempts = 0; S.recovery.qualityFailures = 0; } }, 6000);
@@ -1741,7 +1773,7 @@
           if(!warm.detail||!warm.detail.episodes.length)return LV.toast(label+'暂时无法播放');
           if((LV.loggedIn||GUEST)&&S.reportStarted&&v&&d.episodes[S.i]){
             var saved=Object.assign({},progressOf(d.id)||{},{seriesId:d.id,title:d.title,cover:d.cover,vid:d.episodes[S.i].vid,episodeIndex:S.i,positionMs:Math.max(0,Math.round((v.currentTime||0)*1000)),episodeCount:d.episodes.length,time:Date.now()});
-            recentPlayback.set(d.id,saved);hist=[saved].concat(hist.filter(function(x){return x.seriesId!==d.id}));window.dispatchEvent(new CustomEvent('lv:progress',{detail:saved}));
+            recentPlayback.set(d.id,saved);hist=[saved].concat(hist.filter(function(x){return x.seriesId!==d.id}));saveCachedHist();window.dispatchEvent(new CustomEvent('lv:progress',{detail:saved}));
           }
           LV.toast('本季已播完，继续播放' + label);
           dropPre();S.nextSeasonWarm=null;S.pre=warm;d=warm.detail;S.d=d;S.browseDetail=d;S.browseSeasonID=d.id;S.gi=null;
@@ -2044,9 +2076,25 @@
   var SITE = {};
   async function boot() {
     fetch('/api/invite/me', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : {}; }).then(function (j) { SITE = j || {}; }).catch(function () {});
-    LV.onAuthLost = function () { me = { loggedIn: false }; LV.loggedIn = false; hist = []; recentPlayback.clear(); historyLoaded = false; ++historyRequest; renderAcct(); LV.toast('登录已过期，请重新登录'); };
-    renderAcct();
+    LV.onAuthLost = function () { me = { loggedIn: false }; LV.loggedIn = false; hist = []; recentPlayback.clear(); historyLoaded = false; ++historyRequest; persist('me', me, 7 * 86400e3); persist('hist', [], 7 * 86400e3); renderAcct(); LV.toast('登录已过期，请重新登录'); };
+    var cachedMe = persist('me', undefined, 7 * 86400e3), routedEarly = false;
+    if (cachedMe && (cachedMe.loggedIn || cachedMe.guest) && !cachedMe.browseOnly) {
+      me = cachedMe; GUEST = LV.guest = !!me.guest; BROWSE_ONLY = LV.browseOnly = false; LV.loggedIn = !!me.loggedIn;
+      document.body.classList.toggle('guest', GUEST);
+      var cachedHist = persist('hist', undefined, 7 * 86400e3);
+      if (Array.isArray(cachedHist) && cachedHist.length) {
+        hist = mergeRecentHistory(cachedHist);
+        remember(hist.map(function (c) { return { id: c.seriesId, title: c.title, cover: c.cover, episodes: c.episodeCount }; }));
+      }
+      renderAcct();
+      routedEarly = true;
+      route();
+    } else {
+      renderAcct();
+    }
+    var prevLogged = !!me.loggedIn, prevGuest = !!me.guest, prevBrowse = !!me.browseOnly;
     try { me = await api('/api/me'); } catch (e) { me = { loggedIn: false }; }
+    persist('me', me, 7 * 86400e3);
     GUEST = LV.guest = !!me.guest; BROWSE_ONLY = LV.browseOnly = !!me.browseOnly; browseStorageKey='lvguo.browse.history.'+(me.guestKey||''); document.body.classList.toggle('guest', GUEST);
     if (BROWSE_ONLY && !(await browseCachePresent())) {
       try { localStorage.removeItem(browseStorageKey); localStorage.removeItem('lvguo.browse.proof'); } catch(e) {}
@@ -2054,6 +2102,7 @@
       location.replace('/'); return;
     }
     LV.loggedIn = !!me.loggedIn; renderAcct();
+    if (!LV.loggedIn && !GUEST) { hist = []; persist('hist', [], 7 * 86400e3); }
     if (me.loggedIn && me.hasGuest) api('/api/guest/import', {body:{}}).then(function () { loadHistory(true); }).catch(function () { LV.toast('临时观看记录合并未完成，稍后会重试'); });
     if ((me.loggedIn || GUEST) && !isHomePath()) loadHistory();
     setInterval(function () {
@@ -2061,7 +2110,9 @@
         fetch('/api/ping', { credentials: 'same-origin' }).catch(function () {});
       }
     }, 60000);
-    route();
+    if (!routedEarly || prevLogged !== !!me.loggedIn || prevGuest !== !!me.guest || prevBrowse !== !!me.browseOnly) {
+      route();
+    }
   }
   window.history.scrollRestoration = 'manual';
   boot();

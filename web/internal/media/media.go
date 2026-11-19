@@ -89,6 +89,44 @@ func (m *Cache) HasPlayable(key string) bool {
 	}
 }
 
+// Forget 淘汰指定 vid 的所有流式句柄与缓存分片，供播放失败恢复（fresh=1）强制重取新源。
+func (m *Cache) Forget(vid string) {
+	if vid == "" {
+		return
+	}
+	prefix := vid + "|"
+	var closed []*nativestream.Source
+	m.smu.Lock()
+	for k, e := range m.streams {
+		if strings.HasPrefix(k, prefix) {
+			delete(m.streams, k)
+			select {
+			case <-e.done:
+				if e.src != nil {
+					closed = append(closed, e.src)
+				}
+			default:
+			}
+		}
+	}
+	m.smu.Unlock()
+	for _, s := range closed {
+		s.Close()
+	}
+	m.mu.Lock()
+	for k, e := range m.items {
+		if strings.HasPrefix(k, prefix) {
+			select {
+			case <-e.done:
+				m.size -= int64(len(e.data))
+				delete(m.items, k)
+			default:
+			}
+		}
+	}
+	m.mu.Unlock()
+}
+
 func (m *Cache) Get(key string, load func() ([]byte, error)) ([]byte, error) {
 	m.mu.Lock()
 	e, ok := m.items[key]
@@ -359,11 +397,9 @@ func (m *Cache) loadStream(c *hg.Content, a *hg.Account, vid, def string) (*nati
 			return nil, errors.New("视频缺少解密密钥")
 		}
 	}
-	for _, u := range uniqueURLs(append(append([]string{g.MainURL}, g.BackupURLs...), g.BackupURL)) {
-		src, err := nativestream.OpenWithClient(context.Background(), u, key, cl)
-		if err == nil {
-			return src, nil
-		}
+	urls := uniqueURLs(append(append([]string{g.MainURL}, g.BackupURLs...), g.BackupURL))
+	if src, err := nativestream.OpenURLsWithClient(context.Background(), urls, key, cl); err == nil {
+		return src, nil
 	}
 	return nil, errors.New("视频源打开失败")
 }

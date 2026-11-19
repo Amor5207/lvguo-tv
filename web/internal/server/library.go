@@ -26,7 +26,7 @@ const (
 	uploadInterval = 2 * time.Minute
 	uploadSoon     = 15 * time.Second // 上游对观看历史写入有频率限制（过快会被暂时封禁），本地记录即时可见，不必急着传
 	uploadBatch    = 20
-	historyTTL     = 15 * time.Second
+	historyTTL     = 60 * time.Second
 )
 
 // libRow 是一部剧在本地的最新播放记录。RateDone / HistDone 记录当前快照的两个上游写入是否已被受理。

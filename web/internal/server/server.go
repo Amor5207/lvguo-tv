@@ -437,6 +437,8 @@ func (s *Server) pages(w http.ResponseWriter, r *http.Request) {
 	s.serveFile(w, r, name)
 }
 
+var assetETagPrefix = strconv.FormatInt(time.Now().Unix(), 36)
+
 func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, name string) {
 	f, err := s.cfg.UI.Open(name)
 	if err != nil {
@@ -456,8 +458,10 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, name string) 
 		w.Header().Set("Cache-Control", "private, no-cache")
 	} else if strings.HasSuffix(name, ".js") || strings.HasSuffix(name, ".css") || strings.HasSuffix(name, ".webmanifest") {
 		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("ETag", `"`+assetETagPrefix+`-`+strconv.FormatInt(st.Size(), 36)+`"`)
 	} else {
 		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Header().Set("ETag", `"`+assetETagPrefix+`-`+strconv.FormatInt(st.Size(), 36)+`"`)
 	}
 	rs, ok := f.(io.ReadSeeker)
 	if !ok {

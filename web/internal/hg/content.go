@@ -128,12 +128,29 @@ func (c *Content) get(key string) (any, bool) {
 	return it.v, true
 }
 
+func (c *Content) trimCacheLocked() {
+	if c.cache == nil {
+		c.cache = map[string]cacheItem{}
+		return
+	}
+	if len(c.cache) <= 2000 {
+		return
+	}
+	now := time.Now()
+	for k, it := range c.cache {
+		if now.Sub(it.at) > it.ttl {
+			delete(c.cache, k)
+		}
+	}
+	if len(c.cache) > 2000 {
+		c.cache = map[string]cacheItem{}
+	}
+}
+
 func (c *Content) put(key string, v any, ttl time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(c.cache) > 400 {
-		c.cache = map[string]cacheItem{}
-	}
+	c.trimCacheLocked()
 	c.cache[key] = cacheItem{time.Now(), ttl, v}
 }
 
@@ -606,7 +623,7 @@ func (c *Content) HistorySummaries(cookie string, ids []string) map[string]Entry
 				if e.Title == "" {
 					continue
 				}
-				c.put("history-summary:"+id, e, 10*time.Minute)
+				c.put("history-summary:"+id, e, 6*time.Hour)
 				mu.Lock()
 				out[id] = e
 				mu.Unlock()
@@ -941,12 +958,7 @@ func (c *Content) cachedPlay(vid string, load func() ([]Gear, error)) ([]Gear, e
 	gears, err := load()
 	c.mu.Lock()
 	if err == nil && len(gears) > 0 {
-		if c.cache == nil {
-			c.cache = map[string]cacheItem{}
-		}
-		if len(c.cache) > 400 {
-			c.cache = map[string]cacheItem{}
-		}
+		c.trimCacheLocked()
 		c.cache[key] = cacheItem{at: time.Now(), ttl: 60 * time.Second, v: gears}
 	}
 	pending.gears, pending.err = gears, err
@@ -1061,24 +1073,21 @@ func parsePlayGears(response map[string]any, vid string) ([]Gear, error) {
 	}
 
 	var seed []byte
-	if !hasPlayRows(model["video_list"]) || hasByteVC2Rows(model["video_list"]) {
-		fallback := extractPlayFallbackAPI(model["fallback_api"])
-		if fallback != "" {
-			inner, keySeed, err := fetchCompatiblePlayFallback(fallback)
-			if err != nil {
-				if !hasPlayRows(model["video_list"]) {
-					return nil, err
-				}
-			} else {
-				merged := make(map[string]any, len(model)+len(inner))
-				for key, value := range model {
-					merged[key] = value
-				}
-				for key, value := range inner {
-					merged[key] = value
-				}
-				model, seed = merged, keySeed
+	if fallback := extractPlayFallbackAPI(model["fallback_api"]); fallback != "" {
+		inner, keySeed, err := fetchCompatiblePlayFallback(fallback)
+		if err != nil {
+			if !hasPlayRows(model["video_list"]) {
+				return nil, err
 			}
+		} else {
+			merged := make(map[string]any, len(model)+len(inner))
+			for key, value := range model {
+				merged[key] = value
+			}
+			for key, value := range inner {
+				merged[key] = value
+			}
+			model, seed = merged, keySeed
 		}
 	}
 
