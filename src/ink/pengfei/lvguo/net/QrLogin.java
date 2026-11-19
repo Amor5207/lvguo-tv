@@ -74,6 +74,7 @@ public final class QrLogin {
         long expire = inner.optLong("expire_time");
         long now = System.currentTimeMillis();
         expiresAt = expire > 1_000_000_000L ? expire * 1000 : now + Math.max(30, expire > 0 ? expire : 120) * 1000L;
+        if (expiresAt <= now + 30_000L) expiresAt = now + 120_000L;
     }
 
     /** 轮询一次。确认后会完成跳转并把 cookie 写入会话。 */

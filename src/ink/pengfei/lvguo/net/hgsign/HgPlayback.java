@@ -288,11 +288,18 @@ public final class HgPlayback {
 
     // Narrow bridge shared with authenticated playback modules.
     private static Device moduleDevice;
+    private static long moduleRefreshedAt;
     public static synchronized String moduleIdentity() throws Exception {
         if (moduleDevice == null) moduleDevice = registerDevice();
         org.json.JSONObject out = new org.json.JSONObject();
         out.put("device_id", moduleDevice.deviceID); out.put("iid", moduleDevice.installID); out.put("cdid", moduleDevice.cdid);
         return out.toString();
+    }
+    public static synchronized void rotateModuleIdentity() {
+        long now = System.currentTimeMillis();
+        if (now - moduleRefreshedAt < 30_000L) return;
+        moduleRefreshedAt = now;
+        moduleDevice = null;
     }
     public static byte[] moduleSm3(byte[] data) { return HgSign.sm3(data); }
 

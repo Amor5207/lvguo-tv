@@ -35,7 +35,7 @@ type PlaybackConfig struct {
 
 func defaultPlaybackConfig() PlaybackConfig {
 	yes := true
-	return PlaybackConfig{Schema: 1, Revision: 0, Routes: []string{"v5"}, V5: PlaybackRouteConfig{Endpoint: mobileV5Endpoint, DeviceLevel: 3, VideoPlatform: 1024, NeedAll: &yes}, VideoTab: PlaybackRouteConfig{Endpoint: videoTabEndpoint, DeviceLevel: 1, VideoPlatform: 1024, NeedAll: &yes}, Single: PlaybackRouteConfig{Endpoint: miniReelSingleEndpoint, VideoPlatform: 3, NeedAll: &yes}}
+	return PlaybackConfig{Schema: 1, Revision: 0, Routes: []string{"video_tab", "v5", "single"}, V5: PlaybackRouteConfig{Endpoint: mobileV5Endpoint, DeviceLevel: 1, VideoPlatform: 1024, NeedAll: &yes}, VideoTab: PlaybackRouteConfig{Endpoint: videoTabEndpoint, DeviceLevel: 1, VideoPlatform: 1024, NeedAll: &yes}, Single: PlaybackRouteConfig{Endpoint: miniReelSingleEndpoint, VideoPlatform: 3, NeedAll: &yes}}
 }
 func validPlaybackEndpoint(raw, expectedPath string) bool {
 	u, e := url.Parse(raw)

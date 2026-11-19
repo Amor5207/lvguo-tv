@@ -5,7 +5,6 @@ package server
 // 鉴权：电视端用共享密钥对 vid|ts 做 HMAC-SHA256；密钥来自环境变量 LVGUO_TV_KEY，未配置则接口关闭。
 
 import (
-	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,8 +13,6 @@ import (
 	"os"
 	"strconv"
 	"time"
-
-	"lvguo/internal/hgplay"
 )
 
 func (s *Server) tvModel(w http.ResponseWriter, r *http.Request) {
@@ -41,12 +38,45 @@ func (s *Server) tvModel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden"})
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
-	defer cancel()
-	envelope, err := hgplay.PlayMobileV5(ctx, vid)
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+	gears, err := s.content.Play(s.player, vid)
+	if err != nil || len(gears) == 0 {
+		msg := "playback unavailable"
+		if err != nil {
+			msg = err.Error()
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": msg})
 		return
+	}
+	rows := make([]map[string]any, 0, len(gears))
+	for _, g := range gears {
+		if g.MainURL == "" {
+			continue
+		}
+		rows = append(rows, map[string]any{
+			"main_url":   g.MainURL,
+			"backup_url": g.BackupURL,
+			"video_meta": map[string]any{
+				"definition": g.Definition,
+				"codec_type": g.Codec,
+				"vwidth":     g.Width,
+				"vheight":    g.Height,
+				"size":       g.Size,
+			},
+			"encrypt_info": map[string]any{
+				"encrypt": g.Encrypted,
+				"spade_a": g.SpadeA,
+			},
+		})
+	}
+	envelope := map[string]any{
+		"code": 0,
+		"data": map[string]any{
+			vid: map[string]any{
+				"video_model": map[string]any{
+					"video_list": rows,
+				},
+			},
+		},
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

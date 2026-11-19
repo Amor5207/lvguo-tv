@@ -206,6 +206,9 @@ func NewQR() (*QR, error) {
 	switch {
 	case exp > 1_000_000_000:
 		q.ExpiresAt = time.Unix(exp, 0)
+		if !q.ExpiresAt.After(now.Add(30 * time.Second)) {
+			q.ExpiresAt = now.Add(120 * time.Second)
+		}
 	case exp > 30:
 		q.ExpiresAt = now.Add(time.Duration(exp) * time.Second)
 	default:

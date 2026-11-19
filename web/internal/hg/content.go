@@ -973,7 +973,7 @@ func (c *Content) loadPlay(a *Account, vid string) ([]Gear, error) {
 				continue
 			}
 			gears, err := parsePlayGears(envelope, vid)
-			if err == nil && len(gears) > 0 {
+			if err == nil && hasCompatiblePlayGear(gears) {
 				return gears, nil
 			}
 			if err != nil {
@@ -1047,21 +1047,24 @@ func parsePlayGears(response map[string]any, vid string) ([]Gear, error) {
 	}
 
 	var seed []byte
-	if !hasPlayRows(model["video_list"]) {
-		fallback := strings.TrimSpace(str(model["fallback_api"]))
+	if !hasPlayRows(model["video_list"]) || hasByteVC2Rows(model["video_list"]) {
+		fallback := extractPlayFallbackAPI(model["fallback_api"])
 		if fallback != "" {
-			inner, keySeed, err := fetchPlayFallback(fallback)
+			inner, keySeed, err := fetchCompatiblePlayFallback(fallback)
 			if err != nil {
-				return nil, err
+				if !hasPlayRows(model["video_list"]) {
+					return nil, err
+				}
+			} else {
+				merged := make(map[string]any, len(model)+len(inner))
+				for key, value := range model {
+					merged[key] = value
+				}
+				for key, value := range inner {
+					merged[key] = value
+				}
+				model, seed = merged, keySeed
 			}
-			merged := make(map[string]any, len(model)+len(inner))
-			for key, value := range model {
-				merged[key] = value
-			}
-			for key, value := range inner {
-				merged[key] = value
-			}
-			model, seed = merged, keySeed
 		}
 	}
 
@@ -1152,6 +1155,138 @@ func hasPlayRows(value any) bool {
 	default:
 		return false
 	}
+}
+
+func isByteVC2Codec(codec string) bool {
+	c := strings.ToLower(strings.TrimSpace(codec))
+	return strings.Contains(c, "bytevc2") || strings.Contains(c, "bvc2")
+}
+
+func hasCompatiblePlayGear(gears []Gear) bool {
+	for _, g := range gears {
+		if g.MainURL != "" && !isByteVC2Codec(g.Codec) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasByteVC2Rows(value any) bool {
+	var rows []any
+	switch list := value.(type) {
+	case []any:
+		rows = list
+	case map[string]any:
+		for _, r := range list {
+			rows = append(rows, r)
+		}
+	}
+	for _, item := range rows {
+		vo := obj(item)
+		if vo == nil {
+			continue
+		}
+		meta := obj(vo["video_meta"])
+		codec := str(meta["codec_type"])
+		if codec == "" {
+			codec = str(vo["codec_type"])
+		}
+		if isByteVC2Codec(codec) {
+			return true
+		}
+	}
+	return false
+}
+
+func onlyByteVC2Rows(value any) bool {
+	var rows []any
+	switch list := value.(type) {
+	case []any:
+		rows = list
+	case map[string]any:
+		for _, r := range list {
+			rows = append(rows, r)
+		}
+	}
+	if len(rows) == 0 {
+		return false
+	}
+	for _, item := range rows {
+		vo := obj(item)
+		if vo == nil {
+			continue
+		}
+		meta := obj(vo["video_meta"])
+		codec := str(meta["codec_type"])
+		if codec == "" {
+			codec = str(vo["codec_type"])
+		}
+		if !isByteVC2Codec(codec) {
+			return false
+		}
+	}
+	return true
+}
+
+func extractPlayFallbackAPI(value any) string {
+	switch typed := value.(type) {
+	case string:
+		text := strings.TrimSpace(typed)
+		var decoded any
+		if json.Unmarshal([]byte(text), &decoded) == nil {
+			if nested, ok := decoded.(map[string]any); ok {
+				if fb := extractPlayFallbackAPI(nested["fallback_api"]); fb != "" {
+					return fb
+				}
+			} else if list, ok := decoded.([]any); ok && len(list) > 0 {
+				return extractPlayFallbackAPI(list[0])
+			}
+		}
+		return text
+	case []any:
+		if len(typed) > 0 {
+			return extractPlayFallbackAPI(typed[0])
+		}
+	case map[string]any:
+		return extractPlayFallbackAPI(typed["fallback_api"])
+	}
+	return ""
+}
+
+func fallbackCodecURL(raw, codec string) string {
+	base, query, _ := strings.Cut(raw, "?")
+	kept := make([]string, 0)
+	for _, part := range strings.Split(query, "&") {
+		if part == "" {
+			continue
+		}
+		name, _, _ := strings.Cut(part, "=")
+		decoded, _ := url.QueryUnescape(name)
+		if decoded != "codec_type" && decoded != "force_codec" {
+			kept = append(kept, part)
+		}
+	}
+	if query == "" {
+		kept = nil
+	}
+	return base + "?" + strings.Join(append(kept, codec), "&")
+}
+
+func fetchCompatiblePlayFallback(raw string) (map[string]any, []byte, error) {
+	inner, seed, err := fetchPlayFallback(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	if hasPlayRows(inner["video_list"]) && !hasByteVC2Rows(inner["video_list"]) {
+		return inner, seed, nil
+	}
+	for _, codec := range []string{"codec_type=1", "codec_type=3", "codec_type=0&force_codec=h264"} {
+		candidate, cSeed, cErr := fetchPlayFallback(fallbackCodecURL(raw, codec))
+		if cErr == nil && hasPlayRows(candidate["video_list"]) && !onlyByteVC2Rows(candidate["video_list"]) {
+			return candidate, cSeed, nil
+		}
+	}
+	return inner, seed, nil
 }
 
 func fetchPlayFallback(raw string) (map[string]any, []byte, error) {

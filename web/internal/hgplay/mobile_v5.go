@@ -12,16 +12,66 @@ import (
 	"io"
 	"lvguo/internal/sign"
 	"net/http"
+	"sync"
 	"time"
 )
 
 const mobileV5Endpoint = "https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/player/v1"
 
+var errMobileV5Empty = errors.New("v5 返回空响应")
+
+var mobileV5Identity struct {
+	sync.Mutex
+	device      miniReelDevice
+	expires     time.Time
+	lastRefresh time.Time
+}
+
+func v5Identity(ctx context.Context) (miniReelDevice, error) {
+	mobileV5Identity.Lock()
+	defer mobileV5Identity.Unlock()
+	if validID(mobileV5Identity.device.deviceID) && time.Now().Before(mobileV5Identity.expires) {
+		return mobileV5Identity.device, nil
+	}
+	dev, err := newPassportDevice()
+	if err != nil {
+		return miniReelDevice{}, err
+	}
+	c := newPassportClient(accountSession{Device: dev, Cookies: map[string]string{}})
+	reg, stop := context.WithTimeout(ctx, miniReelDeviceTimeout)
+	defer stop()
+	if err = c.registerDevice(reg); err != nil {
+		return miniReelDevice{}, err
+	}
+	d := miniReelDevice{deviceID: c.session.DeviceID, installID: c.session.InstallID, cdid: dev.CDID, cookie: miniReelPlaybackCookieHeader(c.session.Cookies)}
+	mobileV5Identity.device, mobileV5Identity.expires = d, time.Now().Add(2*time.Hour)
+	return d, nil
+}
+
 func PlayMobileV5(ctx context.Context, vid string) (map[string]any, error) {
 	if !validID(vid) {
 		return nil, errors.New("视频编号无效")
 	}
-	d, err := tabIdentity(ctx)
+	d, err := v5Identity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	model, err := requestMobileV5(ctx, vid, playbackConfig.snapshot().V5, d, nil)
+	if !errors.Is(err, errMobileV5Empty) || ctx.Err() != nil {
+		return model, err
+	}
+	mobileV5Identity.Lock()
+	refresh := mobileV5Identity.device.deviceID == d.deviceID && time.Since(mobileV5Identity.lastRefresh) >= 10*time.Minute
+	if refresh {
+		mobileV5Identity.device = miniReelDevice{}
+		mobileV5Identity.expires = time.Time{}
+		mobileV5Identity.lastRefresh = time.Now()
+	}
+	mobileV5Identity.Unlock()
+	if !refresh {
+		return nil, err
+	}
+	d, err = v5Identity(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +125,7 @@ func requestMobileV5(ctx context.Context, vid string, cfg PlaybackRouteConfig, d
 		return nil, err
 	}
 	if len(bytes.TrimSpace(body)) == 0 {
-		return nil, errors.New("v5 返回空响应")
+		return nil, errMobileV5Empty
 	}
 	if len(body) > playMaxJSONBytes {
 		return nil, errors.New("v5 响应过大")

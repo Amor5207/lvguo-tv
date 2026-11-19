@@ -60,6 +60,7 @@ public final class Repo {
     /** 原始取流没有独立匿名身份这一层，恢复时清缓存重取即可（兼容播放器的恢复流程）。 */
     public static void refreshPlaybackProfile(String vid) {
         invalidatePlay(vid);
+        ink.pengfei.lvguo.net.hgsign.HgPlayback.rotateModuleIdentity();
     }
 
     /** 空 body（Content-Length: 0）表示被静默拒绝，退避后重试 */
