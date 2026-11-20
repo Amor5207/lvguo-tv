@@ -13,11 +13,12 @@ import ink.pengfei.lvguo.ui.Ui;
 import ink.pengfei.lvguo.ui.widget.RoundFrame;
 
 /**
- * 关于：纯展示页，没有任何可选中的控件，一屏放下全部内容（不滚动）。
- * 左：图标、名称、版本号、开源地址二维码；右：免责声明。
+ * 关于：展示图标、名称、版本号、播放模块版本与开源地址二维码，右屏为免责声明。
+ * 发现新版本时这里出现唯一的「更新」按钮（签名模块类更新只在这里提示，不弹首页弹窗）。
  */
 public class AboutPage extends Page {
     public static final String GITHUB = "https://github.com/Amor5207/lvguo-tv";
+    private View updateAction;
 
     @Override protected View build() {
         FrameLayout root = new FrameLayout(ctx);
@@ -47,6 +48,13 @@ public class AboutPage extends Page {
         TextView ver = Ui.text(ctx, "版本号 " + v, 14, Ui.TEXT_3, false);
         LinearLayout.LayoutParams vl = Ui.lp(-2, -2); vl.topMargin = Ui.dp(ctx, 6);
         left.addView(ver, vl);
+        String next = ink.pengfei.lvguo.update.UpdateManager.availableVersion();
+        if (next != null) {
+            updateAction = Ui.action(ctx, "更新到 " + next, -1, true);
+            updateAction.setOnClickListener(x -> ink.pengfei.lvguo.update.UpdateManager.onItemClick(host));
+            LinearLayout.LayoutParams al = Ui.lp(-2, -2); al.topMargin = Ui.dp(ctx, 14);
+            left.addView(updateAction, al);
+        }
 
         LinearLayout gh = Ui.row(ctx);
         gh.setGravity(Gravity.CENTER_VERTICAL);
@@ -105,7 +113,7 @@ public class AboutPage extends Page {
     }
 
     @Override public void onShow() { focusFirst(); }
-    @Override public void focusFirst() { if (root != null) root.requestFocus(); }
+    @Override public void focusFirst() { if (updateAction != null) updateAction.requestFocus(); else if (root != null) root.requestFocus(); }
 
     private static Bitmap qr(String text) {
         try {

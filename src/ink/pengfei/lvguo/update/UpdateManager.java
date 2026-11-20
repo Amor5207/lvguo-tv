@@ -24,7 +24,7 @@ public final class UpdateManager {
 
     private enum State { IDLE, AVAILABLE, DOWNLOADING, READY }
 
-    private static final String P_LAST = "update_last_check", P_SNOOZE = "update_snooze_until", P_SNOOZE_CODE = "update_snooze_code";
+    private static final String P_LAST = "update_last_check", P_IGNORED = "update_ignored_code";
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static final ExecutorService POOL = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "update");
@@ -63,9 +63,9 @@ public final class UpdateManager {
             resumePendingInstall(host);
             if (state == State.READY) { promptReadyOnce(host); return; }
             if (state == State.DOWNLOADING || checking) return;
-            if (state == State.AVAILABLE && info != null && !snoozed(info)) { showFound(host); return; }
+            if (state == State.AVAILABLE && info != null && shouldPrompt(info)) { showFound(host); return; }
             long now = System.currentTimeMillis();
-            if (now - prefs().getLong(P_LAST, 0) < UpdateConfig.CHECK_INTERVAL_MS) return;
+            if (now - prefs().getLong(P_LAST, 0) < UpdateConfig.checkInterval(host)) return;
             runCheck(host, false);
         } catch (Throwable ignored) { }
     }
@@ -138,7 +138,7 @@ public final class UpdateManager {
                         else if (state != State.DOWNLOADING) state = State.AVAILABLE;
                         if (host.isFinishing()) return;
                         if (state == State.READY) { if (manual) install(host); else promptReadyOnce(host); }
-                        else if (state == State.AVAILABLE && (manual || info.force || !snoozed(info))) showFound(host);
+                        else if (state == State.AVAILABLE && (manual || shouldPrompt(info))) showFound(host);
                     } else if (manual) {
                         toast(host, res.ok ? "已是最新版本" : "检查失败，请稍后重试");
                     }
@@ -147,10 +147,19 @@ public final class UpdateManager {
         });
     }
 
-    private static boolean snoozed(UpdateInfo i) {
-        if (i.force) return false;
-        SharedPreferences p = prefs();
-        return p.getInt(P_SNOOZE_CODE, 0) == i.versionCode && System.currentTimeMillis() < p.getLong(P_SNOOZE, 0);
+    /** 自动弹窗策略：签名模块更新只在关于页展示；忽略过的版本不再打扰。 */
+    private static boolean shouldPrompt(UpdateInfo i) {
+        return !i.quiet() && !ignored(i);
+    }
+
+    private static boolean ignored(UpdateInfo i) {
+        return prefs().getInt(P_IGNORED, 0) == i.versionCode;
+    }
+
+    /** 关于页展示：有待安装的新版本时返回版本名，否则返回 null。 */
+    public static String availableVersion() {
+        UpdateInfo i = info;
+        return i == null || state == State.IDLE ? null : i.versionName;
     }
 
     // ------------------------------------------------------------ 弹窗
@@ -160,20 +169,19 @@ public final class UpdateManager {
         if (i == null || host.isFinishing()) return;
         String msg = String.format(Locale.US, "%s · %.1f MB", i.versionName, i.size / 1048576.0)
                 + (i.notes.isEmpty() ? "" : "\n\n" + i.notes);
-        String title = (i.force ? "需要更新到 " : "发现新版本 ") + i.versionName;
-        // 一开始只有「取消 / 更新」；点了「更新」进入下载，才出现「后台更新」
-        UpdateDialog.Btn cancel = new UpdateDialog.Btn("取消", false, () ->
-                prefs().edit().putInt(P_SNOOZE_CODE, i.versionCode).putLong(P_SNOOZE, System.currentTimeMillis() + UpdateConfig.SNOOZE_MS).apply());
+        String title = "发现新版本 " + i.versionName;
+        // 可忽略：记住这一版，之后不再自动弹窗，只能在关于页手动更新
+        UpdateDialog.Btn ignore = new UpdateDialog.Btn("忽略本次更新", false, () ->
+                prefs().edit().putInt(P_IGNORED, i.versionCode).apply());
         UpdateDialog.Btn go = new UpdateDialog.Btn("更新", true, () -> { startDownload(host, i, true); showProgress(host); });
-        if (i.force) new UpdateDialog(host, title, msg, false, true, null, go);
-        else new UpdateDialog(host, title, msg, false, true, null, cancel, go);
+        new UpdateDialog(host, title, msg, false, null, ignore, go);
     }
 
     private static void showProgress(Activity host) {
         final UpdateInfo i = info;
         if (i == null || host.isFinishing()) return;
         if (progressDialog != null && progressDialog.showing()) return;
-        progressDialog = new UpdateDialog(host, "正在下载 " + i.versionName, progressText(), true, true, () -> progressDialog = null,
+        progressDialog = new UpdateDialog(host, "正在下载 " + i.versionName, progressText(), true, () -> progressDialog = null,
                 new UpdateDialog.Btn("取消", false, () -> cancelDownload()),
                 new UpdateDialog.Btn("后台更新", true, () -> toast(host, "已转入后台下载")));
         tickProgress();
@@ -194,9 +202,9 @@ public final class UpdateManager {
 
     private static void promptReadyOnce(Activity host) {
         final UpdateInfo i = info;
-        if (readyPrompted || i == null || ready == null || host.isFinishing()) return;
+        if (readyPrompted || i == null || ready == null || host.isFinishing() || ignored(i)) return;
         readyPrompted = true;
-        new UpdateDialog(host, "新版本已下载", i.versionName + " 已准备好，是否现在安装？", false, true, null,
+        new UpdateDialog(host, "新版本已下载", i.versionName + " 已准备好，是否现在安装？", false, null,
                 new UpdateDialog.Btn("取消", false, null),
                 new UpdateDialog.Btn("安装", true, () -> install(host)));
     }
@@ -224,7 +232,7 @@ public final class UpdateManager {
                         if (!host.isFinishing() && isForeground(host)) {
                             // 用户还停在这个界面：直接进入安装；否则只提示
                             if (foreground || (pd != null)) install(host);
-                            else new UpdateDialog(host, "新版本已下载", i.versionName + " 已准备好，是否现在安装？", false, true, null,
+                            else new UpdateDialog(host, "新版本已下载", i.versionName + " 已准备好，是否现在安装？", false, null,
                                     new UpdateDialog.Btn("取消", false, null), new UpdateDialog.Btn("安装", true, () -> install(host)));
                         }
                     } else {
@@ -266,7 +274,7 @@ public final class UpdateManager {
             UpdateRelaunchReceiver.arm(host);   // 安装完成后自动重新打开
             UpdateInstaller.install(host, f);
         };
-        dlg[0] = new UpdateDialog(host, "即将安装 " + ver, countdownText(INSTALL_COUNTDOWN), true, true,
+        dlg[0] = new UpdateDialog(host, "即将安装 " + ver, countdownText(INSTALL_COUNTDOWN), true,
                 () -> { if (!cancelled[0]) { cancelled[0] = true; MAIN.removeCallbacks(tick[0]); } },
                 new UpdateDialog.Btn("取消", false, null),
                 new UpdateDialog.Btn("立即安装", true, go));

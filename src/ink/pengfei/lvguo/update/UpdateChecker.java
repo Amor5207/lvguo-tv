@@ -46,7 +46,7 @@ final class UpdateChecker {
             if (cur < 0) return new Result(false, null);
             ua = packageName + "/" + version + " (" + cur + ")";
             String url = UpdateConfig.BASE + "/api/v1/check?app=" + URLEncoder.encode(packageName, "UTF-8")
-                    + "&versionCode=" + cur + "&channel=" + UpdateConfig.CHANNEL;
+                    + "&versionCode=" + cur + "&channel=" + UpdateConfig.channel(c);
             HttpURLConnection h = (HttpURLConnection) new URL(url).openConnection();
             try {
                 h.setConnectTimeout(UpdateConfig.CONNECT_TIMEOUT_MS);

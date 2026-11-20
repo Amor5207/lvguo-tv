@@ -24,7 +24,7 @@ final class UpdateDialog {
     private TextView body;
     private View fill, rest;
 
-    UpdateDialog(Activity host, String title, String message, boolean progress, boolean cancelable, Runnable onClose, Btn... btns) {
+    UpdateDialog(Activity host, String title, String message, boolean progress, Runnable onClose, Btn... btns) {
         dialog = new Dialog(host);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         LinearLayout panel = Ui.column(host);
@@ -70,8 +70,7 @@ final class UpdateDialog {
         dialog.setContentView(panel);
         Ui.popIn(panel);
         dialog.setCanceledOnTouchOutside(false);
-        if (cancelable) Ui.closeOnBack(dialog);
-        else dialog.setCancelable(false);
+        Ui.closeOnBack(dialog);
         dialog.setOnDismissListener(d -> { if (onClose != null) onClose.run(); });
         dialog.show();
         Window w = dialog.getWindow();

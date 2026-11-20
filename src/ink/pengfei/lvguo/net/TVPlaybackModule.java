@@ -81,6 +81,8 @@ public final class TVPlaybackModule {
             active=next;
         } catch(Throwable e){Log.i("TVPlaybackModule","Using last verified playback module");}
     }
+    /** 当前生效的签名播放模块版本；0 表示内置模块加载失败。 */
+    public static int revision() { Loaded m=active; return m==null?0:m.revision; }
     public static String play(String vid)throws Exception {
         Loaded module=active;
         if(module==null && startup!=null) { try { startup.get(15,TimeUnit.SECONDS); } catch(Exception ignored) { } module=active; }

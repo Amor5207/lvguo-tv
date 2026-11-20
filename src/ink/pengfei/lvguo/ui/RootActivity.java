@@ -794,6 +794,11 @@ public class RootActivity extends ink.pengfei.lvguo.PlaybackHostActivity {
             focusNav(mCur);return;
         }
         if(mCur!=TAB_HOME){switchTab(TAB_HOME,false);focusNav(TAB_HOME);return;}
+        confirmExit();
+    }
+
+    /** 显示「退出绿果TV？」确认框。 */
+    public void confirmExit(){
         if(mExitDialog!=null && mExitDialog.isShowing())return;
         mExitDialog=ink.pengfei.lvguo.ui.widget.TvDialog.confirm(this,"退出绿果TV？","","退出",this::finish);
     }

@@ -272,6 +272,10 @@ public class SettingsPage extends Page {
             row.postDelayed(this::refreshRows, 1500);
         }));
         about.items.add(new Item("about", "关于软件", () -> version, row -> host.openList(new AboutPage())));
+        about.items.add(new Item("module", "播放模块", () -> {
+            int r = ink.pengfei.lvguo.net.TVPlaybackModule.revision();
+            return r > 0 ? "r" + r : "内置";
+        }, null));
         sections.add(about);
     }
 
