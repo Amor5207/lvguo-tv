@@ -103,8 +103,7 @@ type Content struct {
 	cache     map[string]cacheItem
 	playLoads map[string]*playModelLoad
 	// 分类选择器是全站共享数据，取一次长期缓存
-	selector       map[string]any
-	playbackHealth map[string]map[playbackRoute]playbackRouteHealth
+	selector map[string]any
 }
 
 type cacheItem struct {
@@ -114,7 +113,7 @@ type cacheItem struct {
 }
 
 func NewContent(c *Client) *Content {
-	return &Content{C: c, cache: map[string]cacheItem{}, playbackHealth: map[string]map[playbackRoute]playbackRouteHealth{}}
+	return &Content{C: c, cache: map[string]cacheItem{}}
 }
 
 func (c *Content) get(key string) (any, bool) {
@@ -784,137 +783,6 @@ func markCurrentSeason(seasons []Season, seriesID string) []Season {
 
 // ------------------------------------------------------------ 播放
 
-type playbackRoute struct {
-	host string
-	get  bool
-}
-
-type playbackRouteHealth struct {
-	success      time.Time
-	blockedUntil time.Time
-	empty        bool
-}
-
-var playbackHosts = []string{
-	"api5-normal-sinfonlineb.fqnovel.com",
-	"api5-normal-hl.fqnovel.com",
-	"api5-normal-lf.fqnovel.com",
-}
-
-const (
-	playbackTabPath   = "/reading/bookapi/video_tab/multi_video_model/v1/"
-	playbackMultiPath = "/novel/player/multi_video_model/v1/"
-)
-
-func (c *Content) playbackPlan(deviceID string) []playbackRoute {
-	defaults := playbackRouteList()
-	now := time.Now()
-	c.mu.Lock()
-	health := c.playbackHealth[deviceID]
-	state := make(map[playbackRoute]playbackRouteHealth, len(health))
-	for route, h := range health {
-		state[route] = h
-	}
-	c.mu.Unlock()
-	available := make([]playbackRoute, 0, len(defaults))
-	for _, route := range defaults {
-		if !state[route].blockedUntil.After(now) {
-			available = append(available, route)
-		}
-	}
-	if len(available) > 0 {
-		sort.SliceStable(available, func(i, j int) bool {
-			return state[available[i]].success.After(state[available[j]].success)
-		})
-		for _, route := range available {
-			if !route.get {
-				return available
-			}
-		}
-		// Retain one fallback POST probe even after GET has become the hottest route.
-		fallback := earliestPlaybackPOST(defaults, state)
-		if fallback != (playbackRoute{}) {
-			available = append(available, fallback)
-		}
-		return available
-	}
-	// If every route is cooling down, probe the earliest recoverable POST only.
-	if route := earliestPlaybackPOST(defaults, state); route != (playbackRoute{}) {
-		return []playbackRoute{route}
-	}
-	return defaults
-}
-
-func playbackRouteList() []playbackRoute {
-	routes := []playbackRoute{{host: playbackHosts[0], get: true}}
-	for _, host := range playbackHosts {
-		routes = append(routes, playbackRoute{host: host})
-	}
-	return routes
-}
-
-func earliestPlaybackPOST(routes []playbackRoute, health map[playbackRoute]playbackRouteHealth) playbackRoute {
-	var selected playbackRoute
-	var until time.Time
-	for _, route := range routes {
-		if route.get {
-			continue
-		}
-		blocked := health[route].blockedUntil
-		if selected == (playbackRoute{}) || blocked.Before(until) {
-			selected, until = route, blocked
-		}
-	}
-	return selected
-}
-
-func (c *Content) markPlaybackSuccess(deviceID string, route playbackRoute) {
-	c.mu.Lock()
-	if c.playbackHealth == nil || len(c.playbackHealth) > 400 {
-		c.playbackHealth = map[string]map[playbackRoute]playbackRouteHealth{}
-	}
-	if c.playbackHealth[deviceID] == nil {
-		c.playbackHealth[deviceID] = map[playbackRoute]playbackRouteHealth{}
-	}
-	c.playbackHealth[deviceID][route] = playbackRouteHealth{success: time.Now()}
-	c.mu.Unlock()
-}
-
-func (c *Content) playbackRoutesExhausted(deviceID string, now time.Time) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	health := c.playbackHealth[deviceID]
-	for _, route := range playbackRouteList() {
-		state := health[route]
-		if !state.empty || !state.blockedUntil.After(now) {
-			return false
-		}
-	}
-	return true
-}
-
-func (c *Content) markPlaybackFailure(deviceID string, route playbackRoute, err error) {
-	cooldown := 5 * time.Second
-	var empty *emptyResponseError
-	if errors.As(err, &empty) {
-		cooldown = 30 * time.Second
-	}
-	c.mu.Lock()
-	if c.playbackHealth == nil || len(c.playbackHealth) > 400 {
-		c.playbackHealth = map[string]map[playbackRoute]playbackRouteHealth{}
-	}
-	if c.playbackHealth[deviceID] == nil {
-		c.playbackHealth[deviceID] = map[playbackRoute]playbackRouteHealth{}
-	}
-	state := c.playbackHealth[deviceID][route]
-	state.blockedUntil = time.Now().Add(cooldown)
-	state.empty = cooldown == 30*time.Second
-	c.playbackHealth[deviceID][route] = state
-	c.mu.Unlock()
-}
-
-// Play 取单集各清晰度的播放地址：先走 TV 同款 video_tab GET，失败后按多主机回退签名 POST。
-// 播放模型只做现场请求，不缓存账号/设备绑定的上游 URL。
 // Play 取单集各清晰度的播放地址。
 // 取流走 internal/hgplay：纯 Go 签名（搬运自 aston314/hongguo-tv，含 Gorgon/Helios/Medusa），
 // 注册匿名设备请求 video_model，已实测可取到可播 CDN 直链，不需要 native/模拟器。
@@ -982,10 +850,8 @@ func (c *Content) loadPlay(a *Account, vid string) ([]Gear, error) {
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			var envelope map[string]any
 			var err error
-			if route == "v5" {
-				envelope, err = hgplay.PlayMobileV5(ctx, vid)
-			} else if route == "video_tab" {
-				envelope, err = hgplay.PlayVideoTab(ctx, vid)
+			if route == "legacy" {
+				envelope, err = hgplay.PlayLegacy(ctx, vid)
 			} else {
 				envelope, err = hgplay.Play(ctx, vid)
 			}
@@ -1024,32 +890,6 @@ func playbackCode(response map[string]any) int {
 		return int(num(value))
 	}
 	return -1
-}
-
-func normalizeTabPlaybackResponse(response map[string]any, vid string) (map[string]any, error) {
-	data := obj(response["data"])
-	if data == nil {
-		return nil, errors.New("video_tab 播放响应缺少 data")
-	}
-	rows := obj(data["video_model_data"])
-	if rows == nil {
-		rows = data
-	}
-	row := obj(rows[vid])
-	if row == nil && (data["video_model"] != nil || data["video_list"] != nil) {
-		row = data
-	}
-	if row == nil {
-		return nil, errors.New("video_tab 播放响应缺少视频节点")
-	}
-	model := playModel(row["video_model"])
-	if len(model) == 0 && row["video_list"] != nil {
-		model = row
-	}
-	if len(model) == 0 {
-		return nil, errors.New("video_tab 播放模型为空")
-	}
-	return map[string]any{"data": map[string]any{vid: map[string]any{"video_model": model}}}, nil
 }
 
 func parsePlayGears(response map[string]any, vid string) ([]Gear, error) {

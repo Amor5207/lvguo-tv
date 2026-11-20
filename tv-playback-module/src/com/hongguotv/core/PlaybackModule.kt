@@ -22,9 +22,9 @@ class PlaybackModule {
         val dev = JSONObject(identity)
         val now = System.currentTimeMillis()
         val params = linkedMapOf("aid" to "8662", "app_name" to "novelread", "version_code" to "74332", "version_name" to "7.4.3.32", "channel" to "vivo_8662_64", "device_platform" to "android", "device_type" to "PGT-AN10", "os_version" to "12", "update_version_code" to "74332", "iid" to dev.getString("iid"), "cdid" to dev.getString("cdid"), "device_id" to dev.getString("device_id"), "_rticket" to now.toString())
-        val payload = """{"biz_param":{"detail_page_version":0,"device_level":1,"disable_digg_stat":false,"disable_video_relate_book":false,"need_all_video_definition":true,"need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":1024},"mixed_video_id_map":{"1004":["$vid"]},"dr_scene":"player"}""".toByteArray(Charsets.UTF_8)
+        val payload = """{"biz_param":{"detail_page_version":0,"device_level":1,"disable_digg_stat":false,"disable_video_relate_book":false,"need_all_video_definition":true,"need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":1024},"mixed_video_id_map":{"1004":["$vid"]},"video_id":"$vid","content_type":1}""".toByteArray(Charsets.UTF_8)
         val buffer = ByteArrayOutputStream(); GZIPOutputStream(buffer).use { it.write(payload) }; val body = buffer.toByteArray()
-        val signed = signer.signPlayback("https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/player/v1", params, body, now)
+        val signed = signer.signPlayback("https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/v1/", params, body, now)
         val headers = JSONObject(signed.headers); headers.put("User-Agent", "com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)"); headers.put("Accept", "application/json"); headers.put("Content-Encoding", "gzip")
         return JSONObject().put("url", signed.url).put("headers", headers).put("body", Base64.encodeToString(body, Base64.NO_WRAP)).toString()
     }

@@ -1,7 +1,8 @@
-// SPDX-License-Identifier: GPL-3.0-only
-// Mobile v5 route adapted from N3urda/hongguoTV, commit 18c37c2.
 package hgplay
 
+// Legacy route: signed POST to /novel/player/multi_video_model/v1/. Upstream
+// serves this older path for registered anonymous devices while the newer
+// player/v1 variant answers 200 with an empty body.
 import (
 	"bytes"
 	"compress/gzip"
@@ -16,22 +17,22 @@ import (
 	"time"
 )
 
-const mobileV5Endpoint = "https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/player/v1"
+const legacyMobileEndpoint = "https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/v1/"
 
-var errMobileV5Empty = errors.New("v5 返回空响应")
+var errLegacyModelEmpty = errors.New("legacy 返回空响应")
 
-var mobileV5Identity struct {
+var modelIdentity struct {
 	sync.Mutex
 	device      miniReelDevice
 	expires     time.Time
 	lastRefresh time.Time
 }
 
-func v5Identity(ctx context.Context) (miniReelDevice, error) {
-	mobileV5Identity.Lock()
-	defer mobileV5Identity.Unlock()
-	if validID(mobileV5Identity.device.deviceID) && time.Now().Before(mobileV5Identity.expires) {
-		return mobileV5Identity.device, nil
+func playbackIdentity(ctx context.Context) (miniReelDevice, error) {
+	modelIdentity.Lock()
+	defer modelIdentity.Unlock()
+	if validID(modelIdentity.device.deviceID) && time.Now().Before(modelIdentity.expires) {
+		return modelIdentity.device, nil
 	}
 	dev, err := newPassportDevice()
 	if err != nil {
@@ -44,44 +45,47 @@ func v5Identity(ctx context.Context) (miniReelDevice, error) {
 		return miniReelDevice{}, err
 	}
 	d := miniReelDevice{deviceID: c.session.DeviceID, installID: c.session.InstallID, cdid: dev.CDID, cookie: miniReelPlaybackCookieHeader(c.session.Cookies)}
-	mobileV5Identity.device, mobileV5Identity.expires = d, time.Now().Add(2*time.Hour)
+	modelIdentity.device, modelIdentity.expires = d, time.Now().Add(2*time.Hour)
 	return d, nil
 }
 
-func PlayMobileV5(ctx context.Context, vid string) (map[string]any, error) {
+func PlayLegacy(ctx context.Context, vid string) (map[string]any, error) {
 	if !validID(vid) {
 		return nil, errors.New("视频编号无效")
 	}
-	d, err := v5Identity(ctx)
+	d, err := playbackIdentity(ctx)
 	if err != nil {
 		return nil, err
 	}
-	model, err := requestMobileV5(ctx, vid, playbackConfig.snapshot().V5, d, nil)
-	if !errors.Is(err, errMobileV5Empty) || ctx.Err() != nil {
+	model, err := requestLegacy(ctx, vid, playbackConfig.snapshot().Legacy, d, nil)
+	if !errors.Is(err, errLegacyModelEmpty) || ctx.Err() != nil {
 		return model, err
 	}
-	mobileV5Identity.Lock()
-	refresh := mobileV5Identity.device.deviceID == d.deviceID && time.Since(mobileV5Identity.lastRefresh) >= 10*time.Minute
+	// An expired anonymous identity can return HTTP 200 with an empty body.
+	// Refresh at most once per ten minutes to avoid a registration storm.
+	modelIdentity.Lock()
+	refresh := modelIdentity.device.deviceID == d.deviceID && time.Since(modelIdentity.lastRefresh) >= 10*time.Minute
 	if refresh {
-		mobileV5Identity.device = miniReelDevice{}
-		mobileV5Identity.expires = time.Time{}
-		mobileV5Identity.lastRefresh = time.Now()
+		modelIdentity.device = miniReelDevice{}
+		modelIdentity.expires = time.Time{}
+		modelIdentity.lastRefresh = time.Now()
 	}
-	mobileV5Identity.Unlock()
+	modelIdentity.Unlock()
 	if !refresh {
 		return nil, err
 	}
-	d, err = v5Identity(ctx)
+	d, err = playbackIdentity(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return requestMobileV5(ctx, vid, playbackConfig.snapshot().V5, d, nil)
+	return requestLegacy(ctx, vid, playbackConfig.snapshot().Legacy, d, nil)
 }
-func requestMobileV5(ctx context.Context, vid string, cfg PlaybackRouteConfig, d miniReelDevice, client *http.Client) (map[string]any, error) {
+
+func requestLegacy(ctx context.Context, vid string, cfg PlaybackRouteConfig, d miniReelDevice, client *http.Client) (map[string]any, error) {
 	if !validID(vid) || cfg.NeedAll == nil {
 		return nil, errors.New("播放参数无效")
 	}
-	payload := fmt.Sprintf(`{"biz_param":{"detail_page_version":0,"device_level":%d,"disable_digg_stat":false,"disable_video_relate_book":false,"need_all_video_definition":%t,"need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":%d},"mixed_video_id_map":{"1004":["%s"]},"dr_scene":"player"}`, cfg.DeviceLevel, *cfg.NeedAll, cfg.VideoPlatform, vid)
+	payload := fmt.Sprintf(`{"biz_param":{"detail_page_version":0,"device_level":%d,"disable_digg_stat":false,"disable_video_relate_book":false,"need_all_video_definition":%t,"need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":%d},"mixed_video_id_map":{"1004":["%s"]},"video_id":"%s","content_type":1}`, cfg.DeviceLevel, *cfg.NeedAll, cfg.VideoPlatform, vid, vid)
 	var b bytes.Buffer
 	z := gzip.NewWriter(&b)
 	if _, err := z.Write([]byte(payload)); err != nil {
@@ -118,27 +122,27 @@ func requestMobileV5(ctx context.Context, vid string, cfg PlaybackRouteConfig, d
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("v5 HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("播放接口 HTTP %d", resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, playMaxJSONBytes+1))
 	if err != nil {
 		return nil, err
 	}
 	if len(bytes.TrimSpace(body)) == 0 {
-		return nil, errMobileV5Empty
+		return nil, errLegacyModelEmpty
 	}
 	if len(body) > playMaxJSONBytes {
-		return nil, errors.New("v5 响应过大")
+		return nil, errors.New("播放响应过大")
 	}
 	var root map[string]any
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber()
 	if dec.Decode(&root) != nil {
-		return nil, errors.New("v5 响应格式异常")
+		return nil, errors.New("播放响应格式异常")
 	}
 	for _, key := range []string{"code", "Code"} {
 		if code, ok := root[key]; ok && fmt.Sprint(code) != "0" {
-			return nil, fmt.Errorf("v5 错误码 %v", code)
+			return nil, fmt.Errorf("播放错误码 %v", code)
 		}
 	}
 	data, _ := root["data"].(map[string]any)
@@ -147,7 +151,7 @@ func requestMobileV5(ctx context.Context, vid string, cfg PlaybackRouteConfig, d
 	}
 	node, _ := data[vid].(map[string]any)
 	if node == nil {
-		return nil, errors.New("v5 缺少本集播放模型")
+		return nil, errors.New("缺少本集播放模型")
 	}
 	return map[string]any{"code": 0, "data": map[string]any{vid: node}}, nil
 }

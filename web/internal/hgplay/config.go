@@ -28,14 +28,13 @@ type PlaybackConfig struct {
 	Schema   int                 `json:"schema"`
 	Revision int                 `json:"revision"`
 	Routes   []string            `json:"routes"`
-	V5       PlaybackRouteConfig `json:"v5"`
-	VideoTab PlaybackRouteConfig `json:"video_tab"`
+	Legacy   PlaybackRouteConfig `json:"legacy"`
 	Single   PlaybackRouteConfig `json:"single"`
 }
 
 func defaultPlaybackConfig() PlaybackConfig {
 	yes := true
-	return PlaybackConfig{Schema: 1, Revision: 0, Routes: []string{"video_tab", "v5", "single"}, V5: PlaybackRouteConfig{Endpoint: mobileV5Endpoint, DeviceLevel: 1, VideoPlatform: 1024, NeedAll: &yes}, VideoTab: PlaybackRouteConfig{Endpoint: videoTabEndpoint, DeviceLevel: 1, VideoPlatform: 1024, NeedAll: &yes}, Single: PlaybackRouteConfig{Endpoint: miniReelSingleEndpoint, VideoPlatform: 3, NeedAll: &yes}}
+	return PlaybackConfig{Schema: 1, Revision: 0, Routes: []string{"legacy", "single"}, Legacy: PlaybackRouteConfig{Endpoint: legacyMobileEndpoint, DeviceLevel: 1, VideoPlatform: 1024, NeedAll: &yes}, Single: PlaybackRouteConfig{Endpoint: miniReelSingleEndpoint, VideoPlatform: 3, NeedAll: &yes}}
 }
 func validPlaybackEndpoint(raw, expectedPath string) bool {
 	u, e := url.Parse(raw)
@@ -46,27 +45,24 @@ func validPlaybackEndpoint(raw, expectedPath string) bool {
 	return strings.HasSuffix(host, ".fqnovel.com") && host != ".fqnovel.com"
 }
 func (c PlaybackConfig) Validate() error {
-	if c.Schema != 1 || c.Revision < 0 || len(c.Routes) < 1 || len(c.Routes) > 3 {
+	if c.Schema != 1 || c.Revision < 0 || len(c.Routes) < 1 || len(c.Routes) > 2 {
 		return errors.New("无效的播放配置版本或路线")
 	}
 	seen := map[string]bool{}
 	for _, r := range c.Routes {
-		if (r != "v5" && r != "video_tab" && r != "single") || seen[r] {
+		if (r != "legacy" && r != "single") || seen[r] {
 			return errors.New("不支持的播放路线")
 		}
 		seen[r] = true
 	}
-	if !validPlaybackEndpoint(c.V5.Endpoint, "/novel/player/multi_video_model/player/v1") || !validPlaybackEndpoint(c.VideoTab.Endpoint, "/reading/bookapi/video_tab/multi_video_model/v1/") || !validPlaybackEndpoint(c.Single.Endpoint, "/novel/player/video_model/v1/") {
+	if !validPlaybackEndpoint(c.Legacy.Endpoint, "/novel/player/multi_video_model/v1/") || !validPlaybackEndpoint(c.Single.Endpoint, "/novel/player/video_model/v1/") {
 		return errors.New("不支持的播放接口地址")
 	}
-	if c.V5.DeviceLevel < 0 || c.V5.DeviceLevel > 5 || c.V5.VideoPlatform < 1 || c.V5.VideoPlatform > 10000 || c.V5.NeedAll == nil {
-		return errors.New("v5 播放参数超出允许范围")
+	if c.Legacy.DeviceLevel < 0 || c.Legacy.DeviceLevel > 5 || c.Legacy.VideoPlatform < 1 || c.Legacy.VideoPlatform > 10000 || c.Legacy.NeedAll == nil {
+		return errors.New("legacy 播放参数超出允许范围")
 	}
 	if c.Single.VideoPlatform < 1 || c.Single.VideoPlatform > 10000 || c.Single.NeedAll == nil {
 		return errors.New("单集播放参数超出允许范围")
-	}
-	if c.VideoTab.DeviceLevel < 0 || c.VideoTab.DeviceLevel > 5 || c.VideoTab.VideoPlatform < 1 || c.VideoTab.VideoPlatform > 10000 || c.VideoTab.NeedAll == nil {
-		return errors.New("播放参数超出允许范围")
 	}
 	return nil
 }
@@ -94,9 +90,9 @@ func (m *playbackConfigManager) snapshot() PlaybackConfig {
 	defer m.mu.RUnlock()
 	c := m.current
 	c.Routes = append([]string(nil), c.Routes...)
-	if c.VideoTab.NeedAll != nil {
-		v := *c.VideoTab.NeedAll
-		c.VideoTab.NeedAll = &v
+	if c.Legacy.NeedAll != nil {
+		v := *c.Legacy.NeedAll
+		c.Legacy.NeedAll = &v
 	}
 	return c
 }

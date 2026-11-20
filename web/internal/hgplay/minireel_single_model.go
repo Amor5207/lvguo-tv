@@ -1,7 +1,7 @@
 package hgplay
 
-// The single-episode protocol is deliberately isolated from account requests,
-// video_tab's reusable identity and the legacy POST's profile.
+// The single-episode protocol is deliberately isolated from account requests
+// and the legacy POST's profile.
 import (
 	"context"
 	"encoding/json"
