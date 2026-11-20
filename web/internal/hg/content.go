@@ -1024,9 +1024,10 @@ func hasPlayRows(value any) bool {
 	}
 }
 
+// isByteVC2Codec 判断厂商专有码流（ByteVC1/ByteVC2/VVC）：电视的硬件 HEVC 解码器放不了。
 func isByteVC2Codec(codec string) bool {
 	c := strings.ToLower(strings.TrimSpace(codec))
-	return strings.Contains(c, "bytevc2") || strings.Contains(c, "bvc2")
+	return strings.Contains(c, "bytevc") || strings.Contains(c, "bvc") || strings.Contains(c, "vvc")
 }
 
 func hasCompatiblePlayGear(gears []Gear) bool {
@@ -1143,7 +1144,9 @@ func fetchCompatiblePlayFallback(raw string) (map[string]any, []byte, error) {
 	var lastInner map[string]any
 	var lastSeed []byte
 	var lastErr error
-	for _, codec := range []string{"codec_type=1", "codec_type=3", "codec_type=0&force_codec=h264"} {
+	// 只有同时带 force_codec=h264 时，上游才会返回 360P~1080P 的全部 H.265 版本；
+	// 单独 codec_type=1 只回 1080P，低分辨率电视会因此无档可选。
+	for _, codec := range []string{"codec_type=1&force_codec=h264", "codec_type=1", "codec_type=3", "codec_type=0&force_codec=h264"} {
 		candidate, cSeed, cErr := fetchPlayFallback(fallbackCodecURL(raw, codec))
 		if cErr == nil && hasPlayRows(candidate["video_list"]) && !onlyByteVC2Rows(candidate["video_list"]) {
 			return candidate, cSeed, nil

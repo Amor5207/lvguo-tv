@@ -4,6 +4,6 @@ TV 内置一份经过 RSA 签名的播放模块，负责上游请求、签名和
 
 模块拥有应用权限，只能安装受信任的代码。签名私钥由更新服务独立保管，不放入安装包或代码仓库；APK 内固定公钥。
 
-构建模块前需要完成一次 TV Java 类编译，随后执行 `python3 tools/build_tv_playback_module.py`。验证模块后，通过发布脚本将带内容哈希的 dex 发布到更新站点并生成签名清单；首次打包应用时增加 `--embed` 将已签名清单及模块放入 `assets/playback/`。
+构建模块前需要完成一次 TV Java 类编译，随后执行 `python3 tools/build_tv_playback_module.py`。验证模块后，通过发布脚本将带内容哈希的 dex 发布到更新站点并生成签名清单；首次打包应用时增加 `--embed` 将已签名清单及模块放入 `assets/playback/`。仅模块变更的发布不需要重新打包 APK，发布新模块清单后已安装设备会自动更新；只有应用代码或模块 ABI 变更时才打包 APK。
 
 ABI 1 的模块通过 `prepare(vid, identity)` 构造上游签名请求，通过 `normalize(vid, response)` 输出稳定的 `data[vid].video_model.video_list`，因此上游请求和解析调整可在后续模块中完成。若新增超出 ABI 的能力，仍需更新 APK。备用模型服务使用同一新版线路，视频由电视直接请求 CDN。

@@ -48,7 +48,7 @@ class PlaybackModule {
         var model = if (value is JSONObject) value else JSONObject(value.toString())
         var seed: ByteArray? = null
         var canonical = extractCanonical(model, null)
-        if (vid != "123456" && (canonical.length() == 0 || hasByteVC2(canonical))) {
+        if (vid != "123456" && (canonical.length() == 0 || hasProprietary(canonical))) {
             val fb = extractFallbackUrl(model.opt("fallback_api"))
             if (fb.isNotEmpty()) {
                 val resolved = resolveCompatibleFallback(fb)
@@ -61,8 +61,21 @@ class PlaybackModule {
             }
         }
         require(canonical.length() > 0)
+        // 只把电视硬件解码器真正能放的码流交给 APP；专有码流交由服务端备用通道协商。
+        canonical = filterPlayable(canonical)
+        require(canonical.length() > 0) { "播放模型没有可解码流" }
         val result = JSONObject().put("video_model", JSONObject().put("video_list", canonical))
         return JSONObject().put("code", 0).put("data", JSONObject().put(vid, result)).toString()
+    }
+    private fun filterPlayable(list: JSONArray): JSONArray {
+        val out = JSONArray()
+        for (i in 0 until list.length()) {
+            val meta = list.optJSONObject(i)?.optJSONObject("video_meta")
+            val codec = meta?.optString("codec_type", "") ?: ""
+            if (isProprietary(codec)) continue
+            out.put(list.optJSONObject(i))
+        }
+        return out
     }
     private fun extractCanonical(model: JSONObject, seed: ByteArray?): JSONArray {
         val listObj = model.opt("video_list")
@@ -95,24 +108,25 @@ class PlaybackModule {
         }
         return canonical
     }
-    private fun isByteVC2(codec: String): Boolean {
+    // ByteVC1/ByteVC2/VVC 都要厂商专有解码器，电视的硬件 HEVC 解码器放不了。
+    private fun isProprietary(codec: String): Boolean {
         val c = codec.lowercase()
-        return c.contains("bytevc2") || c.contains("bvc2")
+        return c.contains("bytevc") || c.contains("bvc") || c.contains("vvc")
     }
-    private fun hasByteVC2(list: JSONArray): Boolean {
+    private fun hasProprietary(list: JSONArray): Boolean {
         for (i in 0 until list.length()) {
             val meta = list.optJSONObject(i)?.optJSONObject("video_meta")
             val codec = meta?.optString("codec_type", "") ?: ""
-            if (isByteVC2(codec)) return true
+            if (isProprietary(codec)) return true
         }
         return false
     }
-    private fun onlyByteVC2(list: JSONArray): Boolean {
+    private fun onlyProprietary(list: JSONArray): Boolean {
         if (list.length() == 0) return false
         for (i in 0 until list.length()) {
             val meta = list.optJSONObject(i)?.optJSONObject("video_meta")
             val codec = meta?.optString("codec_type", "") ?: ""
-            if (!isByteVC2(codec)) return false
+            if (!isProprietary(codec)) return false
         }
         return true
     }
@@ -141,10 +155,12 @@ class PlaybackModule {
         return "$base?${kept.joinToString("&")}"
     }
     private fun resolveCompatibleFallback(fbUrl: String): Pair<JSONObject, ByteArray?>? {
-        for (codec in listOf("codec_type=1", "codec_type=3", "codec_type=0&force_codec=h264")) {
+        // 只有同时带 force_codec=h264 时，上游才会返回 360P~1080P 的全部 H.265 版本；
+        // 单独 codec_type=1 只回 1080P，低分辨率电视会因此无档可选。
+        for (codec in listOf("codec_type=1&force_codec=h264", "codec_type=1", "codec_type=3", "codec_type=0&force_codec=h264")) {
             val pair = fetchFallback(replaceCodecQuery(fbUrl, codec)) ?: continue
             val list = extractCanonical(pair.first, pair.second)
-            if (list.length() > 0 && !onlyByteVC2(list)) return pair
+            if (list.length() > 0 && !onlyProprietary(list)) return pair
         }
         return fetchFallback(fbUrl)
     }

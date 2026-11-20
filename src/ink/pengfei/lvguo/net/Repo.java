@@ -654,7 +654,7 @@ public final class Repo {
             g.kid = ei == null ? null : ei.optString("kid", null);
             if (!g.mainUrl.isEmpty()) out.add(g);
         }
-        cachePut(ck, out, 5 * 60 * 1000L);
+        if (!out.isEmpty()) cachePut(ck, out, 5 * 60 * 1000L);
         return out;
     }
 

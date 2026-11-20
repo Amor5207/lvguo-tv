@@ -85,7 +85,8 @@ public final class VideoDecoderSupport {
     private static boolean supportedCodec(Gear gear){
         if(gear==null)return false;
         String codec=gear.codec==null?"":gear.codec.toLowerCase(Locale.US);
-        return !codec.contains("bytevc2")&&!codec.contains("vvc");
+        // ByteVC 与 VVC 都需要厂商专有解码器，Android 硬件 HEVC 解码器放不了这些码流。
+        return !codec.contains("bytevc")&&!codec.contains("bvc")&&!codec.contains("vvc");
     }
 
     private static boolean supportsSize(List<MediaCodecInfo> decoders, int width, int height,float fps) {

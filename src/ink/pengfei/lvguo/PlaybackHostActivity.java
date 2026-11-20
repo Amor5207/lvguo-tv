@@ -435,6 +435,8 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
     private int compatSequence=-1;
     private boolean reusePlayer,reuseFeedPlayer;   // 本次 playAt 是否复用现有播放器做无缝换集/换剧（见 playAt / beginEpisodeSwitch / attachPending）
     private volatile int playbackCeiling=ink.pengfei.lvguo.media.PlaybackCompatibility.maxShortSide();
+    /** 本集选中的档位高于当前清晰度上限（该集只有这一档可选）。 */
+    private boolean forcedAboveCeiling;
     /** 当前这一集用的是解码阶梯的第几级（见 PlaybackCompatibility）。 */
     private volatile int rung=ink.pengfei.lvguo.media.PlaybackCompatibility.RUNG_MEDIA3;
     private int networkRetries;
@@ -500,6 +502,8 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
                 }else showError(seq,error);
                 return;
             default:
+                // 已超出当前清晰度上限的唯一档位仍然解码失败，说明本机确实放不了，直接报错避免无限重试。
+                if(forcedAboveCeiling){showError(seq,error);return;}
                 int current=activeGear==null?effectiveCeiling():activeGear.shortSide();
                 if(rung<ink.pengfei.lvguo.media.PlaybackCompatibility.RUNG_LAST){
                     rung++;
@@ -1331,8 +1335,11 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
     private Gear pickPlaybackGear(List<Gear> gears){
         List<Gear> compatible=VideoDecoderSupport.compatibleHevc(gears);
         Gear highestAvailable=Repo.pickGear(compatible,null,Integer.MAX_VALUE);
-        if(highestAvailable==null)return null;
-        return Repo.pickGear(compatible,prefer==null?"720p":prefer,effectiveCeiling());
+        if(highestAvailable==null){forcedAboveCeiling=false;return null;}
+        Gear chosen=Repo.pickGear(compatible,prefer==null?"720p":prefer,effectiveCeiling());
+        // 单集只提供高于当前上限的档位时，宁可先播它（由解码阶梯兜底），也不能报「没有可用播放源」。
+        forcedAboveCeiling=chosen==null;
+        return chosen!=null?chosen:highestAvailable;
     }
     private boolean overlayOpen(){return isEpisodeOpen() || commentsOpen || (settingsDialog!=null && settingsDialog.isShowing());}
 

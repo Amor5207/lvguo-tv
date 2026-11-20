@@ -3,8 +3,8 @@ plugins {
 }
 
 def applicationIdValue = providers.gradleProperty('lvguoApplicationId').getOrElse('ink.pengfei.lvguo')
-def versionCodeValue = Integer.parseInt(providers.gradleProperty('lvguoVersionCode').getOrElse('2002'))
-def versionNameValue = providers.gradleProperty('lvguoVersionName').getOrElse('2.0.2')
+def versionCodeValue = Integer.parseInt(providers.gradleProperty('lvguoVersionCode').getOrElse('2003'))
+def versionNameValue = providers.gradleProperty('lvguoVersionName').getOrElse('2.0.3')
 def manifestFileValue = providers.gradleProperty('lvguoManifest').getOrElse('AndroidManifest.xml')
 
 dependencies {
