@@ -242,6 +242,10 @@ func (s *PlaybackSigner) SignMobileV5(base string, values Params, body []byte, n
 		random = rand.Float64
 	}
 	ts := uint32(nowMs / 1000)
+	bodyMD5 := make([]byte, 16)
+	if body != nil {
+		bodyMD5 = MD5(body)
+	}
 	who := map[string]string{}
 	for _, p := range values {
 		who[p.K] = p.V
@@ -258,7 +262,7 @@ func (s *PlaybackSigner) SignMobileV5(base string, values Params, body []byte, n
 		ticket := nowMs + offset
 		query := append(Params{}, values...).Set("_rticket", strconv.FormatInt(ticket, 10))
 		encoded := EncodeParams(query)
-		if iv(SM3([]byte(encoded)), MD5(body), ts)&15 != 12 {
+		if iv(SM3([]byte(encoded)), bodyMD5, ts)&15 != 12 {
 			continue
 		}
 		u := base + "?" + encoded

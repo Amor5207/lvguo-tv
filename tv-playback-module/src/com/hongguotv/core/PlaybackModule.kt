@@ -4,12 +4,10 @@ package com.hongguotv.core
 import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLDecoder
 import java.security.MessageDigest
-import java.util.zip.GZIPOutputStream
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -17,16 +15,29 @@ import javax.crypto.spec.SecretKeySpec
 /** ABI v1: create an upstream request and normalize its response. */
 class PlaybackModule {
     private val signer = Signer(mobileV5 = true)
+    // 2026-11-20 起上游对旧 V5 POST 一律回 200 空 body（dr_scene 已移入请求体）；
+    // video_tab 空 body 签名 GET 是同一上游当前的可用播放路线。
     fun prepare(vid: String, identity: String): String {
         require(vid.matches(Regex("[0-9]{6,24}")))
         val dev = JSONObject(identity)
         val now = System.currentTimeMillis()
-        val params = linkedMapOf("aid" to "8662", "app_name" to "novelread", "version_code" to "74332", "version_name" to "7.4.3.32", "channel" to "vivo_8662_64", "device_platform" to "android", "device_type" to "PGT-AN10", "os_version" to "12", "update_version_code" to "74332", "iid" to dev.getString("iid"), "cdid" to dev.getString("cdid"), "device_id" to dev.getString("device_id"), "_rticket" to now.toString())
-        val payload = """{"biz_param":{"detail_page_version":0,"device_level":1,"disable_digg_stat":false,"disable_video_relate_book":false,"need_all_video_definition":true,"need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":1024},"mixed_video_id_map":{"1004":["$vid"]},"video_id":"$vid","content_type":1}""".toByteArray(Charsets.UTF_8)
-        val buffer = ByteArrayOutputStream(); GZIPOutputStream(buffer).use { it.write(payload) }; val body = buffer.toByteArray()
-        val signed = signer.signPlayback("https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/v1/", params, body, now)
-        val headers = JSONObject(signed.headers); headers.put("User-Agent", "com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)"); headers.put("Accept", "application/json"); headers.put("Content-Encoding", "gzip")
-        return JSONObject().put("url", signed.url).put("headers", headers).put("body", Base64.encodeToString(body, Base64.NO_WRAP)).toString()
+        val params = linkedMapOf(
+            "aid" to "8662", "app_name" to "novelread",
+            "version_code" to "74332", "version_name" to "7.4.3.32",
+            "channel" to "vivo_8662_64", "device_platform" to "android",
+            "device_type" to "PGT-AN10", "os_version" to "12",
+            "update_version_code" to "74332",
+            "iid" to dev.getString("iid"), "cdid" to dev.getString("cdid"), "device_id" to dev.getString("device_id"),
+            "video_id" to vid, "video_id_type" to "0", "device_level" to "1",
+            "need_all_video_definition" to "1", "need_mp4_align" to "0",
+            "use_os_player" to "0", "video_platform" to "1024",
+            "source" to "0", "from_video_id" to "",
+        )
+        val signed = signer.signPlayback("https://api5-normal-sinfonlinea.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/", params, null, now)
+        val headers = JSONObject(signed.headers)
+        headers.put("User-Agent", "com.phoenix.read/73932 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)")
+        headers.put("Accept", "application/json")
+        return JSONObject().put("url", signed.url).put("headers", headers).toString()
     }
     fun normalize(vid: String, response: String): String {
         val root = JSONObject(response); require(root.optInt("code", 0) == 0)

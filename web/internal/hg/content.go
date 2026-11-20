@@ -841,7 +841,8 @@ func (c *Content) loadPlay(a *Account, vid string) ([]Gear, error) {
 		return nil, errors.New("视频编号无效")
 	}
 	var last error
-	for _, route := range hgplay.PlaybackRoutes() {
+	routes := append([]string{"videotab"}, hgplay.PlaybackRoutes()...)
+	for _, route := range routes {
 		attempts, timeout := 1, 12*time.Second
 		if route == "single" {
 			attempts, timeout = 2, 30*time.Second
@@ -850,9 +851,12 @@ func (c *Content) loadPlay(a *Account, vid string) ([]Gear, error) {
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			var envelope map[string]any
 			var err error
-			if route == "legacy" {
+			switch route {
+			case "legacy":
 				envelope, err = hgplay.PlayLegacy(ctx, vid)
-			} else {
+			case "videotab":
+				envelope, err = hgplay.PlayVideoTab(ctx, vid)
+			default:
 				envelope, err = hgplay.Play(ctx, vid)
 			}
 			cancel()
