@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="ink.pengfei.lvguo" android:versionCode="2003" android:versionName="2.0.3">
+    package="ink.pengfei.lvguo" android:versionCode="2004" android:versionName="2.0.4">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -43,6 +43,7 @@
         </receiver>
 
         <activity android:name=".ui.StartupActivity" android:exported="true"
+            android:theme="@style/StartupTheme"
             android:banner="@drawable/tv_banner"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|uiMode"
             android:screenOrientation="landscape">

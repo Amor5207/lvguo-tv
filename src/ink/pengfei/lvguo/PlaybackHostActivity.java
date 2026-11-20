@@ -449,6 +449,10 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
     // 连续两集都这样才记成「这台设备 1080p 不行」（记 30 分钟）。真正的解码报错仍然立即记。
     private boolean rungFromTimeout;
     private static int timeoutDowngrades;
+    /** 本集累计的持续掉帧信号（10 秒窗口 ≥20 帧，或连续 3 次迟到 ≥80ms）。 */
+    private int performanceLagEvents;
+    private long lastPerformanceDowngradeAt;
+    private static final long PERFORMANCE_DOWNGRADE_COOLDOWN_MS=120_000L;
     private String switchMessage;
     private int effectiveCeiling(){return Math.min(playbackCeiling,ink.pengfei.lvguo.media.PlaybackCompatibility.ceiling(rung));}
     /** 播放器侧旁证：数据流最近读失败过，或准备阶段几乎没收到数据 → 更像网络问题而不是解码问题。 */
@@ -648,7 +652,7 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
         closeEpisodes();
         if(!keepRate){restorePosition=Math.max(0,pendingResumePosition);pendingResumePosition=0;restorePaused=false;}
         upNextCancelled=false;hideUpNext();
-        ended=false;allFinished=false;buffering=false;bufferedPercent=0;openingReceivedBytes=0;measuredBytes=0;measuredAt=android.os.SystemClock.elapsedRealtime();measuredSource=null;seekPreview=-1;ui.removeCallbacks(commitSeek);lastEpisodeTapKey=KeyEvent.KEYCODE_UNKNOWN;lastVideoSyncRecoveryAt=0;lastMetricsSampleAt=0;lastMetricsDataAt=0;lastMetricsLogAt=0;lastMetricsPosition=0;lastMetricsFrames=-1;lastMetricsDropped=-1;
+        ended=false;allFinished=false;buffering=false;bufferedPercent=0;openingReceivedBytes=0;measuredBytes=0;measuredAt=android.os.SystemClock.elapsedRealtime();measuredSource=null;seekPreview=-1;ui.removeCallbacks(commitSeek);lastEpisodeTapKey=KeyEvent.KEYCODE_UNKNOWN;lastVideoSyncRecoveryAt=0;lastMetricsSampleAt=0;lastMetricsDataAt=0;lastMetricsLogAt=0;lastMetricsPosition=0;lastMetricsFrames=-1;lastMetricsDropped=-1;performanceLagEvents=0;
         if(!keepRate && !speedLocked)playbackSpeed=1f;keepRate=false;
         index=target; final int seq=++sequence;
         if(commentsDialog!=null){commentsDialog.dismiss();commentsDialog=null;}
@@ -740,8 +744,6 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
     private WarmedClip warmEpisodeStream(final String vid,final Gear gear)throws Exception {
         if(vid==null || vid.isEmpty() || gear==null)return null;
         File cached=VideoCache.cached(App.ctx(),vid,gear.definition);
-        if(cached==null && android.os.Build.VERSION.SDK_INT<=28 && gear.shortSide()>720)
-            cached=VideoCache.prepare(App.ctx(),vid,gear,null);
         if(cached!=null || hasWarmed(vid,gear.definition))return null;
         FutureTask<WarmedClip> created=new FutureTask<>(()->{
             StreamingSource source=new StreamingSource(gear);
@@ -906,6 +908,27 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
     private void configurePlayer(final ink.pengfei.lvguo.media.CompatMediaPlayer media){
         media.setOnVideoSizeChangedListener((mp,w,h)->{ if(player==media && !destroyed) fitVideoSize(w,h); });
         media.setOnCompletionListener(mp->{ if(player==mp && !destroyed) onEpisodeComplete(); });
+        // Media3 的掉帧回调在其内部播放线程触发，所有状态判断与重启都投递回 UI 线程。
+        media.setPerformanceListener((dropped,window,offsetUs)->{
+            if(player!=media || destroyed)return;
+            ui.post(()->{
+                if(player!=media || destroyed || !prepared || !firstFrame || ended || failed
+                        || paused || buffering || !foreground || !surfaceReady)return;
+                performanceLagEvents++;
+                if(activeGear==null || activeGear.shortSide()<=720 || forcedAboveCeiling)return;
+                // 一次 120 帧以上的掉帧窗口或 400ms 级迟到可立即降级，否则要连续两次信号（间隔≥30 秒）。
+                if(performanceLagEvents<2 && dropped<120 && offsetUs<400_000L)return;
+                long now=android.os.SystemClock.elapsedRealtime();
+                if(lastPerformanceDowngradeAt!=0 && now-lastPerformanceDowngradeAt<PERFORMANCE_DOWNGRADE_COOLDOWN_MS)return;
+                lastPerformanceDowngradeAt=now;
+                final int position=restartPosition();
+                ink.pengfei.lvguo.media.PlaybackDiagnostics.event("performance_downgrade","from="+activeGear.shortSide()+"P positionMs="+position+" dropped="+dropped+" windowMs="+window+" offsetUs="+offsetUs);
+                android.util.Log.w("TVPlayback","Performance downgrade seq="+sequence+" from="+activeGear.shortSide()+"P position="+position);
+                ink.pengfei.lvguo.media.PlaybackCompatibility.failed();
+                prefer="720p";App.prefs().edit().putString("quality",prefer).apply();
+                restartEpisode(position,"解码性能不足，已切换到 720P",0);
+            });
+        });
         media.setOnSeekCompleteListener(mp->{
             if(player!=mp || destroyed || !prepared)return;
             if(startupCorrection){startupCorrection=false;videoReady(sequence,mp,"startup-rewind");}
@@ -1011,7 +1034,7 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
         if(previousStream!=null && previousStream!=stream)previousStream.close();
 
         index=previousIndex+1;activeGear=nextGear;prepared=true;firstFrame=false;
-        networkRetries=0;sourceRetries=0;profileRefreshes=0;
+        networkRetries=0;sourceRetries=0;profileRefreshes=0;performanceLagEvents=0;
         startupPosition=0;startupRewound=true;startupCorrection=false;restorePosition=0;restorePaused=false;
         playbackStartedAt=android.os.SystemClock.elapsedRealtime();lastKnownDuration=0;progressSavedAt=0;
         startupRewound=true;ended=false;allFinished=false;buffering=false;bufferedPercent=0;upNextCancelled=false;hideUpNext();
@@ -1063,7 +1086,8 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
         ui.postDelayed(()->{if(seq==sequence && player==media && firstFrame && !failed){networkRetries=0;sourceRetries=0;profileRefreshes=0;
             if(rungFromTimeout && workedRung>ink.pengfei.lvguo.media.PlaybackCompatibility.startRung() && ++timeoutDowngrades<2)ink.pengfei.lvguo.media.PlaybackDiagnostics.event("decode_rung_once",ink.pengfei.lvguo.media.PlaybackCompatibility.label(workedRung));
             else ink.pengfei.lvguo.media.PlaybackCompatibility.rungWorked(workedRung);}},6000);
-        if(activeGear.shortSide()>720)ui.postDelayed(()->{if(seq==sequence && player==media && firstFrame && !failed){timeoutDowngrades=0;ink.pengfei.lvguo.media.PlaybackCompatibility.confirmed();}},3000);
+        // 30 秒无解码故障、无持续掉帧才确认这台设备能稳住这一档；3 秒就确认会把降级立刻抹掉。
+        if(activeGear.shortSide()>720)ui.postDelayed(()->{if(seq==sequence && player==media && firstFrame && !failed && performanceLagEvents==0){timeoutDowngrades=0;ink.pengfei.lvguo.media.PlaybackCompatibility.confirmed();}},30000);
         ink.pengfei.lvguo.media.PlaybackDiagnostics.event("first_frame",activeGear.shortSide()+"P position="+media.getCurrentPosition());
         android.util.Log.i("TVPlayback","Visible first frame seq="+seq+" position="+media.getCurrentPosition()+" target="+startupPosition+" reason="+reason+" ms="+(android.os.SystemClock.elapsedRealtime()-playbackStartedAt));
         scheduleWarmup(seq);

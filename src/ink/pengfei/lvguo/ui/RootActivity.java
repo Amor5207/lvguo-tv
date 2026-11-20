@@ -75,6 +75,7 @@ public class RootActivity extends ink.pengfei.lvguo.PlaybackHostActivity {
     private View mFocusBeforeOverlay;
     private Runnable mRestoreOverlayPosition;
     private android.app.Dialog mExitDialog;
+    private boolean startupFrameDrawn;
 
     // ------------------------------------------------------------ 生命周期
 
@@ -82,7 +83,7 @@ public class RootActivity extends ink.pengfei.lvguo.PlaybackHostActivity {
     protected void onCreate(Bundle b) {
         sCurrent = new java.lang.ref.WeakReference<>(this);
         super.onCreate(b);
-        if(ink.pengfei.lvguo.care.RestMode.enforce(this))return;   // 强制休息时段内：不进入正常界面
+        if(ink.pengfei.lvguo.care.RestMode.enforce(this)){StartupGate.drawn();return;}   // 强制休息时段内：不进入正常界面
         try{ink.pengfei.lvguo.update.UpdateManager.cleanup(this);}catch(Throwable ignored){}
         Ui.applyTheme(this);
         getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Ui.BG));
@@ -116,11 +117,26 @@ public class RootActivity extends ink.pengfei.lvguo.PlaybackHostActivity {
         focusNav(TAB_HOME);
         // 导航默认收起：启动后把焦点交给内容区（首页数据到达后会再落到第一张卡）。
         mPages[TAB_HOME].focusFirst();
+        reportStartupDrawn();
         // 启动续播：上次没看完的剧（弹窗询问 / 直接续播 / 不提示，见设置 → 播放）
         // 强制休息结束回到首页时不续播（需求：休息结束不自动恢复之前的视频）
         if(!getIntent().getBooleanExtra(ink.pengfei.lvguo.care.RestActivity.EXTRA_AFTER_REST,false))
             mRoot.post(()->ink.pengfei.lvguo.ui.widget.ResumePrompt.afterHistoryReady(this,
                     ()->mResumed && mCur==TAB_HOME && !isOverlayOpen() && !ink.pengfei.lvguo.care.RestMode.isResting()));
+    }
+
+    /** 首页首帧真正上屏时通知启动页；之前已出过画（进程还活着）时 onResume 直接放行。 */
+    private void reportStartupDrawn(){
+        final View decor=getWindow().getDecorView();
+        decor.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener(){
+            @Override public boolean onPreDraw(){
+                android.view.ViewTreeObserver observer=decor.getViewTreeObserver();
+                if(observer.isAlive())observer.removeOnPreDrawListener(this);
+                startupFrameDrawn=true;
+                StartupGate.drawn();
+                return true;
+            }
+        });
     }
 
     /** 停在首页等界面（没在看剧）时，到了休息开始时间直接进入休息页，不需要倒计时。 */
@@ -140,6 +156,7 @@ public class RootActivity extends ink.pengfei.lvguo.PlaybackHostActivity {
         super.onResume();
         mResumed=true;
         if(ink.pengfei.lvguo.care.RestMode.enforce(this))return;
+        if(startupFrameDrawn)StartupGate.drawn();
         if(toLoginIfNeeded())return;
         restWatch.run();
         // 播放器会把全局调色板强制成深色；返回后恢复 App 选定的主题，后续新建的视图才一致。

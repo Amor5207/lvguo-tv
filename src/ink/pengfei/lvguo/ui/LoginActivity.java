@@ -41,18 +41,33 @@ public class LoginActivity extends Activity {
     private TextView sendBtn, phoneStatus, tabQr, tabPhone, loginTitle;
     private boolean loginExpired;
     private boolean phoneMode;
+    private boolean startupFrameDrawn;
     private long codeSentAt;
     private final ink.pengfei.lvguo.net.hgsign.HgAccount account = new ink.pengfei.lvguo.net.hgsign.HgAccount();
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
-        if (ink.pengfei.lvguo.care.RestMode.enforce(this)) return;   // 强制休息时段内：直接进休息页
+        if (ink.pengfei.lvguo.care.RestMode.enforce(this)){ink.pengfei.lvguo.ui.StartupGate.drawn();return;}   // 强制休息时段内：直接进休息页
         // 已登录直接进主界面，不先建一遍登录页（启动 Activity 每次冷启动都会经过这里）
         if (Session.loggedIn()) { finishToApp(); return; }
         Ui.applyTheme(this);
         getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Ui.BG));
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(buildUi());
+        reportStartupDrawn();
+    }
+
+    private void reportStartupDrawn(){
+        final android.view.View decor=getWindow().getDecorView();
+        decor.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener(){
+            @Override public boolean onPreDraw(){
+                android.view.ViewTreeObserver observer=decor.getViewTreeObserver();
+                if(observer.isAlive())observer.removeOnPreDrawListener(this);
+                startupFrameDrawn=true;
+                ink.pengfei.lvguo.ui.StartupGate.drawn();
+                return true;
+            }
+        });
     }
 
     private TextView countdown;
@@ -592,6 +607,7 @@ public class LoginActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         if (ink.pengfei.lvguo.care.RestMode.enforce(this)) return;
+        if(startupFrameDrawn)ink.pengfei.lvguo.ui.StartupGate.drawn();
         active = true;
         if (Session.loggedIn()) { finishToApp(); return; }
         if (!phoneMode) {

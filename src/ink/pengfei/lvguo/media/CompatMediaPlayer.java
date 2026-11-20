@@ -34,9 +34,19 @@ public final class CompatMediaPlayer extends MediaPlayer {
     private OnVideoSizeChangedListener sizeListener;
     private OnBufferingUpdateListener bufferListener;
     private EpisodeTransitionListener episodeTransitionListener;
+    private PerformanceListener performanceListener;
+    private long lagWindowStartMs, lastLagNotifyMs, lastDropLogAt, lastOffsetLogAt;
+    private int lagWindowDropped, lateReports;
+    private static final long LAG_WINDOW_MS=10_000L, LAG_NOTIFY_COOLDOWN_MS=30_000L, LATE_FRAME_OFFSET_US=80_000L;
+    private static final int LAG_DROP_LIMIT=20;
 
     public interface EpisodeTransitionListener {
         void onTransition(String mediaId, int oldPositionMs, boolean completed);
+    }
+
+    /** 持续掉帧/迟到帧信号：用于把「能播但解码跟不上」与硬解码失败区分开。 */
+    public interface PerformanceListener {
+        void onVideoLag(int droppedFrames, long windowMs, long averageOffsetUs);
     }
 
     public CompatMediaPlayer(Context context) {
@@ -67,19 +77,34 @@ public final class CompatMediaPlayer extends MediaPlayer {
             @Override public void onVideoFrameProcessingOffset(EventTime time,long totalProcessingOffsetUs,int frameCount){
                 if(frameCount<=0)return;
                 long averageOffsetUs=totalProcessingOffsetUs/frameCount;
-                if(averageOffsetUs>=50_000L){
+                long now=android.os.SystemClock.elapsedRealtime();
+                if(averageOffsetUs>=50_000L && now-lastOffsetLogAt>=10_000L){
+                    lastOffsetLogAt=now;
                     PlaybackDiagnostics.event("compat_video_late_frames","averageOffsetUs="+averageOffsetUs+" frameCount="+frameCount+" positionMs="+backend.getCurrentPosition());
                 }
+                if(!readyForLagMetrics()){lateReports=0;return;}
+                if(averageOffsetUs>=LATE_FRAME_OFFSET_US){
+                    if(++lateReports>=3)lagSignal(0,0,averageOffsetUs);
+                }else lateReports=0;
             }
             @Override public void onDroppedVideoFrames(EventTime time,int droppedFrames,long elapsedMs){
                 if(droppedFrames<=0)return;
-                PlaybackDiagnostics.event("compat_dropped_frames","count="+droppedFrames+" elapsedMs="+elapsedMs+" positionMs="+backend.getCurrentPosition());
+                long now=android.os.SystemClock.elapsedRealtime();
+                if(now-lastDropLogAt>=5_000L){
+                    lastDropLogAt=now;
+                    PlaybackDiagnostics.event("compat_dropped_frames","count="+droppedFrames+" elapsedMs="+elapsedMs+" positionMs="+backend.getCurrentPosition());
+                }
                 if(droppedFrames>=12 && elapsedMs<=1500)info(MEDIA_INFO_VIDEO_TRACK_LAGGING);
+                if(!readyForLagMetrics()){resetLagWindow();return;}
+                if(lagWindowStartMs==0 || now-lagWindowStartMs>LAG_WINDOW_MS){lagWindowStartMs=now;lagWindowDropped=0;}
+                lagWindowDropped+=droppedFrames;
+                if(lagWindowDropped>=LAG_DROP_LIMIT)lagSignal(lagWindowDropped,now-lagWindowStartMs,0);
             }
         });
         backend.addListener(new Player.Listener(){
             @Override public void onPlaybackStateChanged(int state){
                 if(released)return;
+                if(state!=Player.STATE_READY)resetLagWindow();
                 android.util.Log.i("TVPlayback","Compatibility state="+state+" buffered="+backend.getBufferedPosition());
                 if(state==Player.STATE_READY){
                     if(!ready){ready=true;if(preparedListener!=null)preparedListener.onPrepared(CompatMediaPlayer.this);}
@@ -99,6 +124,7 @@ public final class CompatMediaPlayer extends MediaPlayer {
             }
             @Override public void onVideoSizeChanged(VideoSize size){if(sizeListener!=null)sizeListener.onVideoSizeChanged(CompatMediaPlayer.this,size.width,size.height);}
             @Override public void onPositionDiscontinuity(Player.PositionInfo oldPosition,Player.PositionInfo newPosition,int reason){
+                if(reason==Player.DISCONTINUITY_REASON_SEEK)resetLagWindow();
                 if(reason==Player.DISCONTINUITY_REASON_SEEK && backend.getPlaybackState()==Player.STATE_READY)seekFinished();
                 if (backend.getCurrentMediaItemIndex() > 0
                         && oldPosition.mediaItemIndex != newPosition.mediaItemIndex
@@ -112,6 +138,7 @@ public final class CompatMediaPlayer extends MediaPlayer {
                 }
             }
             @Override public void onMediaItemTransition(MediaItem item,int reason){
+                resetLagWindow();
                 if(item!=null && backend.getCurrentMediaItemIndex()>0){frameSeen=false;frameNotified=false;}
             }
             @Override public void onPlayerError(PlaybackException error){
@@ -120,6 +147,17 @@ public final class CompatMediaPlayer extends MediaPlayer {
                 if(errorListener!=null)errorListener.onError(CompatMediaPlayer.this,error.errorCode>=4000&&error.errorCode<5000?MEDIA_ERROR_UNSUPPORTED:MEDIA_ERROR_IO,error.errorCode);
             }
         });
+    }
+    private boolean readyForLagMetrics(){
+        return !released && frameSeen && backend.getPlaybackState()==Player.STATE_READY && backend.isPlaying();
+    }
+    private void resetLagWindow(){lagWindowStartMs=0;lagWindowDropped=0;lateReports=0;}
+    private void lagSignal(int droppedFrames,long windowMs,long averageOffsetUs){
+        long now=android.os.SystemClock.elapsedRealtime();
+        if(now-lastLagNotifyMs<LAG_NOTIFY_COOLDOWN_MS)return;
+        lastLagNotifyMs=now;resetLagWindow();
+        PerformanceListener listener=performanceListener;
+        if(listener!=null)listener.onVideoLag(droppedFrames,windowMs,averageOffsetUs);
     }
     private void info(int what){if(!released && infoListener!=null)infoListener.onInfo(this,what,0);}
     private void notifyFrame(){if(ready && frameSeen && !frameNotified){frameNotified=true;info(MEDIA_INFO_VIDEO_RENDERING_START);}}
@@ -159,14 +197,14 @@ public final class CompatMediaPlayer extends MediaPlayer {
      *  起播位置仍由调用方在 onPrepared 里 seek（下一集传 0 即从头开始，不会重放上一集）。 */
     public void replaceSource(MediaDataSource source,String mediaId){
         if(released)return;
-        ready=false;pendingSeek=false;frameSeen=false;frameNotified=false;
+        ready=false;pendingSeek=false;frameSeen=false;frameNotified=false;resetLagWindow();
         backend.setVolume(0f);
         backend.setMediaSource(sourceFor(source,mediaId));
         backend.prepare();
     }
     public void replaceSource(String path,String mediaId){
         if(released)return;
-        ready=false;pendingSeek=false;frameSeen=false;frameNotified=false;
+        ready=false;pendingSeek=false;frameSeen=false;frameNotified=false;resetLagWindow();
         backend.setVolume(0f);
         MediaItem item=new MediaItem.Builder().setUri(Uri.fromFile(new File(path))).setMediaId(mediaId).build();
         backend.setMediaItem(item);
@@ -176,6 +214,7 @@ public final class CompatMediaPlayer extends MediaPlayer {
     public boolean isReleased(){return released;}
 
     public void setEpisodeTransitionListener(EpisodeTransitionListener listener){episodeTransitionListener=listener;}
+    public void setPerformanceListener(PerformanceListener listener){performanceListener=listener;}
     public boolean appendNextDataSource(MediaDataSource source,String mediaId){
         if(released || backend.getMediaItemCount()!=1)return false;
         backend.addMediaSource(sourceFor(source,mediaId));return true;
@@ -197,7 +236,7 @@ public final class CompatMediaPlayer extends MediaPlayer {
     }
     @Override public void setDisplay(SurfaceHolder surface){holder=surface;backend.setVideoSurfaceHolder(surface);}
     @Override public void setScreenOnWhilePlaying(boolean enabled){if(holder!=null)holder.setKeepScreenOn(enabled);}
-    @Override public void prepareAsync(){backend.setVolume(0f);backend.prepare();backend.play();}
+    @Override public void prepareAsync(){resetLagWindow();backend.setVolume(0f);backend.prepare();backend.play();}
     @Override public void start(){backend.play();}
     @Override public void pause(){backend.pause();}
     @Override public void stop(){backend.stop();}

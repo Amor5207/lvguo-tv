@@ -9,6 +9,13 @@
         <item name="android:windowNoTitle">true</item>
     </style>
 
+    <style name="StartupTheme" parent="@style/AppTheme">
+        <!-- 透明启动页：首页在下面先出画，启动页只负责在真正慢的时候渐入/渐出 -->
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
+
     <style name="PlayerTheme" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
         <item name="android:windowBackground">@android:color/black</item>
         <item name="android:colorBackground">@android:color/black</item>
