@@ -3,8 +3,8 @@ plugins {
 }
 
 def applicationIdValue = providers.gradleProperty('lvguoApplicationId').getOrElse('ink.pengfei.lvguo')
-def versionCodeValue = Integer.parseInt(providers.gradleProperty('lvguoVersionCode').getOrElse('2001'))
-def versionNameValue = providers.gradleProperty('lvguoVersionName').getOrElse('2.0.1')
+def versionCodeValue = Integer.parseInt(providers.gradleProperty('lvguoVersionCode').getOrElse('2002'))
+def versionNameValue = providers.gradleProperty('lvguoVersionName').getOrElse('2.0.2')
 def manifestFileValue = providers.gradleProperty('lvguoManifest').getOrElse('AndroidManifest.xml')
 
 dependencies {
@@ -22,7 +22,8 @@ android {
         targetSdk 28
         versionCode versionCodeValue
         versionName versionNameValue
-        manifestPlaceholders = [appLabel: providers.gradleProperty('lvguoAppLabel').getOrElse('@string/app_name')]
+        manifestPlaceholders = [appLabel: providers.gradleProperty('lvguoAppLabel').getOrElse('@string/app_name'),
+                                updateChannel: providers.gradleProperty('lvguoUpdateChannel').getOrElse('stable')]
     }
 
     sourceSets {

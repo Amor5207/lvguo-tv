@@ -1,8 +1,8 @@
 from pathlib import Path
 import subprocess,zipfile,sys,os,json,tempfile,re
 root=Path(__file__).resolve().parent
-version_code=int(os.environ.get('LVGUO_VERSION_CODE','2001'))
-version_name=os.environ.get('LVGUO_VERSION_NAME','2.0.1')
+version_code=int(os.environ.get('LVGUO_VERSION_CODE','2002'))
+version_name=os.environ.get('LVGUO_VERSION_NAME','2.0.2')
 application_id=os.environ.get('LVGUO_APPLICATION_ID','ink.pengfei.lvguo')
 manifest_source=Path(os.environ.get('LVGUO_MANIFEST',str(root/'AndroidManifest.xml')))
 if not manifest_source.is_absolute():manifest_source=root/manifest_source
@@ -32,7 +32,7 @@ def executable(folder,name):
  native=folder/name
  return native if native.exists() else folder/(name+'.exe')
 # Keep the standalone SDK build consistent with Gradle's manifest placeholders.
-manifest_text=manifest_source.read_text(encoding='utf-8').replace('${appLabel}',os.environ.get('LVGUO_APP_LABEL','@string/app_name')).replace('${applicationId}',application_id)
+manifest_text=manifest_source.read_text(encoding='utf-8').replace('${appLabel}',os.environ.get('LVGUO_APP_LABEL','@string/app_name')).replace('${applicationId}',application_id).replace('${updateChannel}',os.environ.get('LVGUO_UPDATE_CHANNEL','stable'))
 manifest_text=re.sub(r'android:versionCode="[^"]+"',f'android:versionCode="{version_code}"',manifest_text,count=1)
 manifest_text=re.sub(r'android:versionName="[^"]+"',f'android:versionName="{version_name}"',manifest_text,count=1)
 manifest=b/'AndroidManifest.xml'
