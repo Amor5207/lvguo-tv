@@ -8,22 +8,22 @@ import ink.pengfei.lvguo.App;
 /**
  * 每台设备的解码策略：先按能力表筛一遍，再用真实播放结果确认。
  *
- * 片源只有 H.265（服务端不提供 H.264），所以兼容性靠一条逐级降级的「解码阶梯」：
+ * 片源通常只有 H.265（服务端目前不提供 H.264），兼容性靠一条逐级降级的「解码阶梯」：
  * <pre>
- *   0 Media3 硬件解码（全清晰度）
- *   1 Media3 硬件解码，≤720P
+ *   0 Media3 解码（优先硬件，全清晰度）
+ *   1 Media3 解码，≤720P
  * </pre>
- * 仅尝试硬件解码；硬件不支持时降低到 720P 后明确报错，不切软件解码。
- * 只有「解码类」故障才往下走一级；网络故障不降级。成功出画的那一级会被记住，
- * 后面每一集直接从这一级起播，不会每集都先失败一次。
+ * 优先硬件 HEVC；设备完全没有硬件 HEVC 时，允许 Media3 使用系统自带软解，
+ * 并只尝试最低清晰度。只有「解码类」故障才往下走一级；网络故障不降级。
+ * 成功出画的那一级会被记住，后面每一集直接从这一级起播，不会每集都先失败一次。
  */
 public final class PlaybackCompatibility {
     private PlaybackCompatibility(){}
     public static final int RUNG_MEDIA3=0, RUNG_MEDIA3_720=1, RUNG_LAST=RUNG_MEDIA3_720;
 
-    private static String profile(){return Build.FINGERPRINT+":media3-1.5.1-v22-hw-only-audio-clock";}
+    private static String profile(){return Build.FINGERPRINT+":media3-1.5.1-v23-hevc-hw-sw-fallback";}
     public static void initialize(){
-        // 默认清晰度 1080P：片源全档 HEVC，解码阶梯会在真解不动时自动降级。
+        // 默认清晰度 1080P：片源通常全档 HEVC，解码阶梯会在真解不动时自动降级。
         // 旧版本曾把所有设备一次性强制成 720P（720p-default-v1，并非用户选择），这里纠正一次。
         if(!"1080p-default-v2".equals(App.prefs().getString("quality_default_profile","")))
             App.prefs().edit().putString("quality","1080p").putString("quality_default_profile","1080p-default-v2").apply();
@@ -33,20 +33,23 @@ public final class PlaybackCompatibility {
             if(!App.prefs().contains("decode_rung"))App.prefs().edit().putInt("decode_rung",RUNG_MEDIA3).apply();
             return;
         }
-        boolean supported=false,hardware=false;
+        boolean supported=false,hardware=false,software=false;
         try{for(MediaCodecInfo codec:new MediaCodecList(MediaCodecList.REGULAR_CODECS).getCodecInfos()){
-            if(codec.isEncoder() || !isHardware(codec))continue;
-            for(String type:codec.getSupportedTypes())if("video/hevc".equalsIgnoreCase(type))try{
-                hardware=true;
-                MediaCodecInfo.VideoCapabilities video=codec.getCapabilitiesForType(type).getVideoCapabilities();
+            if(codec.isEncoder())continue;
+            boolean hevc=false;
+            for(String type:codec.getSupportedTypes())if("video/hevc".equalsIgnoreCase(type)){hevc=true;break;}
+            if(!hevc)continue;
+            if(!isHardware(codec)){software=true;continue;}
+            hardware=true;
+            try{
+                MediaCodecInfo.VideoCapabilities video=codec.getCapabilitiesForType("video/hevc").getVideoCapabilities();
                 if(video!=null && video.areSizeAndRateSupported(1080,1920,30))supported=true;
             }catch(Exception ignored){}
         }}catch(Exception ignored){}
-        // Use Media3 as the only video backend because the platform MediaPlayer does not
-        // expose a public hardware-only decoder selector. Its HEVC selector filters software.
+        // 硬件 HEVC 优先；完全没有硬件解码器时，Media3 才允许使用系统软解。
         // 不动 quality：默认画质由上面的 720p-default 迁移负责，这里换解码档案不能覆盖用户选过的清晰度。
         App.prefs().edit().putString("decode_profile",current).putInt("decode_1080",0).putInt("decode_rung",RUNG_MEDIA3).apply();
-        PlaybackDiagnostics.event("capability_screen",(hardware?"hardware HEVC advertised":"no hardware HEVC advertised")+"; "+(supported?"1080P candidate":"default 720P")+"; Media3 hardware-only video decode; software decode disabled");
+        PlaybackDiagnostics.event("capability_screen",(hardware?"hardware HEVC advertised":software?"software HEVC advertised":"no HEVC decoder advertised")+"; "+(supported?"1080P candidate":"default 720P")+"; Media3 HEVC hardware-first with software fallback");
     }
 
     /** 软解码器的名字特征（API 29 以前没有 isSoftwareOnly）。 */
@@ -120,8 +123,8 @@ public final class PlaybackCompatibility {
     /** 给用户看的名字（设置页 / 诊断）。 */
     public static String label(int rung){
         switch(rung){
-            case RUNG_MEDIA3_720: return "Media3 硬解 · 最高 720P";
-            default: return "Media3 硬解";
+            case RUNG_MEDIA3_720: return "Media3 解码 · 最高 720P";
+            default: return "Media3 解码";
         }
     }
 }

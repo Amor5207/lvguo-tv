@@ -1,4 +1,4 @@
-package hgplay
+package lvguoplay
 
 // 本文件为从 aston314/hongguo-tv 搬运的签名/设备注册代码补齐最小依赖：
 // 端点常量、设备/会话结构、若干 helper，以及把该项目的播放诊断简化为无副作用的 stub。
@@ -19,11 +19,11 @@ import (
 )
 
 const (
-	passportAPI          = "https://api5-normal-lq.fqnovel.com"
-	miniReelAPIBase      = "https://api5-normal-lq.fqnovel.com"
-	miniReelAPIPath      = "/novel/player/multi_video_model/v1/"
+	passportAPI           = "https://api5-normal-lq.fqnovel.com"
+	miniReelAPIBase       = "https://api5-normal-lq.fqnovel.com"
+	miniReelAPIPath       = "/novel/player/multi_video_model/v1/"
 	miniReelDeviceTimeout = 8 * time.Second
-	defaultHongguoUA     = "com.phoenix.read/73532 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)"
+	defaultHongguoUA      = "com.phoenix.read/73532 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)"
 )
 
 var errPassportEmptyResponse = errors.New("上游响应为空")

@@ -1,4 +1,4 @@
-package ink.pengfei.lvguo.net.hgsign;
+package ink.pengfei.lvguo.net.lvguosign;
 
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -8,20 +8,20 @@ import java.util.*;
 
 /**
  * 手机号验证码登录（纯 Java，移植自 aston314/hongguo-tv 的 passport 流程）。
- * 复用 HgSign（Medusa/Gorgon/Helios）与 HgPlayback 的设备注册/签名底层。
+ * 复用 LvguoSign（Medusa/Gorgon/Helios）与 LvguoPlayback 的设备注册/签名底层。
  * 仅支持 +86（国内手机号）；成功后返回会话 cookie，交给 Session.begin 建立登录态。
  * 注意：短信下发/验证需真实手机号，服务器侧风控存在，实际可用性以手机实测为准。
  */
-public final class HgAccount {
+public final class LvguoAccount {
     private static final String ACCOUNT_API = "https://api5-normal-lq.fqnovel.com";
     private static final String ACCOUNT_DEVICE_BASE = "https://log.snssdk.com";
     private static final String VERSION = "7.3.5.32";
 
-    private HgPlayback.Device device;
+    private LvguoPlayback.Device device;
 
     /** 本次登录所用设备：{device_id, install_id, cdid, openudid}；登录后的账号写请求要沿用这一台。 */
     public String[] deviceIds() {
-        HgPlayback.Device d = device;
+        LvguoPlayback.Device d = device;
         if (d == null || d.deviceID == null || d.installID == null) return null;
         return new String[]{d.deviceID, d.installID, d.cdid == null ? "" : d.cdid, d.openudid == null ? "" : d.openudid};
     }
@@ -53,7 +53,7 @@ public final class HgAccount {
     }
 
     // 账号基础设备档（版本 7.3.5.32），与 passport 签名一致。
-    private Map<String, String> baseQuery(HgPlayback.Device d) {
+    private Map<String, String> baseQuery(LvguoPlayback.Device d) {
         Map<String, String> q = new LinkedHashMap<>();
         String[][] kv = {{"ac", "wifi"}, {"aid", "8662"}, {"app_name", "novelread"}, {"channel", "update_64"},
             {"device_brand", "Redmi"}, {"device_id", d.deviceID}, {"device_platform", "android"}, {"device_type", "25053RT47C"},
@@ -64,7 +64,7 @@ public final class HgAccount {
         return q;
     }
 
-    private byte[] basePayload(HgPlayback.Device d, long stamp) {
+    private byte[] basePayload(LvguoPlayback.Device d, long stamp) {
         Map<String, Object> h = new LinkedHashMap<>();
         Object[][] base = {{"aid", 8662}, {"access", "wifi"}, {"app_version", VERSION}, {"app_version_minor", ""}, {"channel", "update_64"},
             {"device_brand", "Redmi"}, {"device_manufacturer", "Redmi"}, {"device_model", "25053RT47C"}, {"device_category", "phone"}, {"device_platform", "android"},
@@ -80,7 +80,7 @@ public final class HgAccount {
         h.put("custom", custom);
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("magic_tag", "ss_app_log"); root.put("header", h); root.put("_gen_time", stamp);
-        return HgPlayback.jsonStringify(root).getBytes(StandardCharsets.UTF_8);
+        return LvguoPlayback.jsonStringify(root).getBytes(StandardCharsets.UTF_8);
     }
 
     private final Object deviceLock = new Object();
@@ -93,18 +93,18 @@ public final class HgAccount {
         if (device != null && device.deviceID != null) return;
         synchronized (deviceLock) {
             if (device != null && device.deviceID != null) return;
-            HgPlayback.Device d = HgPlayback.newDevice();
+            LvguoPlayback.Device d = LvguoPlayback.newDevice();
             long now = System.currentTimeMillis();
-            byte[] seed = new byte[32]; HgPlayback.RND.nextBytes(seed);
-            byte[] body = HgPlayback.ttEncrypt(basePayload(d, now), seed);
+            byte[] seed = new byte[32]; LvguoPlayback.RND.nextBytes(seed);
+            byte[] body = LvguoPlayback.ttEncrypt(basePayload(d, now), seed);
             Map<String, String> q = baseQuery(d);
             q.remove("device_id"); q.remove("iid");
             q.put("tt_data", "a"); q.put("ts", Long.toString(now / 1000)); q.put("_rticket", Long.toString(now));
             q.put("package", "com.phoenix.read");
-            String query = HgPlayback.encode(q);
+            String query = LvguoPlayback.encode(q);
             HttpURLConnection c = (HttpURLConnection) new URL(ACCOUNT_DEVICE_BASE + "/service/2/device_register/?" + query).openConnection();
             c.setRequestMethod("POST"); c.setConnectTimeout(12000); c.setReadTimeout(12000); c.setDoOutput(true);
-            c.setRequestProperty("User-Agent", HgPlayback.DEFAULT_UA);
+            c.setRequestProperty("User-Agent", LvguoPlayback.DEFAULT_UA);
             c.setRequestProperty("Content-Type", "application/octet-stream;tt-data=a");
             c.setRequestProperty("Accept", "application/json; charset=utf-8,application/x-protobuf");
             c.setRequestProperty("Content-Encoding", "gzip");
@@ -117,19 +117,19 @@ public final class HgAccount {
             c.setRequestProperty("X-Tt-Store-Region", "cn");
             c.setRequestProperty("X-Tt-Store-Region-Src", "did");
             c.setRequestProperty("X-Khronos", Long.toString(now / 1000));
-            c.setRequestProperty("X-Argus", HgSign.b64(HgSign.le32((int) (now / 1000))));
+            c.setRequestProperty("X-Argus", LvguoSign.b64(LvguoSign.le32((int) (now / 1000))));
             c.setRequestProperty("X-SS-Req-Ticket", q.get("_rticket"));
-            c.setRequestProperty("X-SS-STUB", HgSign.toHex(HgPlayback.md5(body)));
-            c.setRequestProperty("X-Gorgon", HgSign.gorgon(query, body, (int) (now / 1000), HgPlayback.randU32() & 0xFFFF));
+            c.setRequestProperty("X-SS-STUB", LvguoSign.toHex(LvguoPlayback.md5(body)));
+            c.setRequestProperty("X-Gorgon", LvguoSign.gorgon(query, body, (int) (now / 1000), LvguoPlayback.randU32() & 0xFFFF));
             OutputStream os = c.getOutputStream(); os.write(body); os.close();
             int code = c.getResponseCode();
             List<String> sc = c.getHeaderFields().get("Set-Cookie");
-            byte[] resp = HgPlayback.readAll(code >= 400 ? c.getErrorStream() : c.getInputStream());
+            byte[] resp = LvguoPlayback.readAll(code >= 400 ? c.getErrorStream() : c.getInputStream());
             if (code != 200) { c.disconnect(); throw new Exception("设备注册 HTTP " + code); }
-            if (resp.length >= 6 && resp[0] == 0x74 && resp[1] == 0x63 && resp[2] == 5 && resp[3] == 0x10) resp = HgPlayback.ttDecrypt(resp);
+            if (resp.length >= 6 && resp[0] == 0x74 && resp[1] == 0x63 && resp[2] == 5 && resp[3] == 0x10) resp = LvguoPlayback.ttDecrypt(resp);
             String rs = new String(resp, StandardCharsets.UTF_8);
-            String did = HgPlayback.extract(rs, "device_id_str"); if (did.isEmpty()) did = HgPlayback.extract(rs, "device_id");
-            String iid = HgPlayback.extract(rs, "install_id_str"); if (iid.isEmpty()) iid = HgPlayback.extract(rs, "install_id");
+            String did = LvguoPlayback.extract(rs, "device_id_str"); if (did.isEmpty()) did = LvguoPlayback.extract(rs, "device_id");
+            String iid = LvguoPlayback.extract(rs, "install_id_str"); if (iid.isEmpty()) iid = LvguoPlayback.extract(rs, "install_id");
             if (did.isEmpty() || iid.isEmpty() || did.equals("0") || iid.equals("0")) throw new Exception("设备注册未返回有效身份");
             d.deviceID = did; d.installID = iid;
             if (sc != null) for (String line : sc) {
@@ -148,16 +148,16 @@ public final class HgAccount {
     private Map<String, Object> accountPost(String path, Map<String, String> form) throws Exception {
         ensureDevice();
         StringBuilder fb = new StringBuilder();
-        for (Map.Entry<String, String> e : form.entrySet()) { if (fb.length() > 0) fb.append('&'); fb.append(HgPlayback.goEscape(e.getKey())).append('=').append(HgPlayback.goEscape(e.getValue())); }
+        for (Map.Entry<String, String> e : form.entrySet()) { if (fb.length() > 0) fb.append('&'); fb.append(LvguoPlayback.goEscape(e.getKey())).append('=').append(LvguoPlayback.goEscape(e.getValue())); }
         byte[] body = fb.toString().getBytes(StandardCharsets.UTF_8);
         long stamp = System.currentTimeMillis();
         Map<String, String> q = baseQuery(device);
-        HgPlayback.Signed s = HgPlayback.signRequest(q, body, stamp, device.deviceID, VERSION);
+        LvguoPlayback.Signed s = LvguoPlayback.signRequest(q, body, stamp, device.deviceID, VERSION);
         HttpURLConnection c = (HttpURLConnection) new URL(ACCOUNT_API + path + "?" + s.rawQuery).openConnection();
         c.setRequestMethod("POST"); c.setConnectTimeout(12000); c.setReadTimeout(12000); c.setDoOutput(true);
         c.setInstanceFollowRedirects(false);
         for (Map.Entry<String, String> e : s.headers.entrySet()) c.setRequestProperty(e.getKey(), e.getValue());
-        c.setRequestProperty("User-Agent", HgPlayback.DEFAULT_UA);
+        c.setRequestProperty("User-Agent", LvguoPlayback.DEFAULT_UA);
         c.setRequestProperty("Accept", "application/json");
         c.setRequestProperty("X-XS-From-Web", "0"); c.setRequestProperty("Sdk-Version", "2");
         c.setRequestProperty("Passport-Sdk-Version", "5051452"); c.setRequestProperty("X-SS-DP", "8662");
@@ -180,7 +180,7 @@ public final class HgAccount {
             }
         }
         String tk = c.getHeaderField("X-Tt-Token"); if (tk != null && !tk.isEmpty()) token = tk;
-        byte[] resp = HgPlayback.readAll(code >= 400 ? c.getErrorStream() : c.getInputStream());
+        byte[] resp = LvguoPlayback.readAll(code >= 400 ? c.getErrorStream() : c.getInputStream());
         if (code != 200) { c.disconnect(); throw new Exception("账号服务 HTTP " + code); }
         lastRaw = new String(resp, StandardCharsets.UTF_8);
         return parse(lastRaw);
@@ -201,10 +201,10 @@ public final class HgAccount {
         f.put("account_sdk_source", "app"); f.put("passport_support_flow", "captcha,verify"); f.put("mix_mode", "1");
         f.put("auto_read", "0"); f.put("unbind_exist", "34"); f.put("type", xor5("24"));
         Map<String, Object> r = accountPost("/passport/mobile/send_code/v1/", f);
-        String msg = HgPlayback.str(r.get("message"));
+        String msg = LvguoPlayback.str(r.get("message"));
         if ("success".equals(msg)) return "success";
         Map<String, Object> data = asMap(r.get("data"));
-        String desc = data != null ? HgPlayback.str(data.get("description")) : "";
+        String desc = data != null ? LvguoPlayback.str(data.get("description")) : "";
         throw new Exception(desc.isEmpty() ? ("发送验证码失败：" + msg) : desc);
     }
 
@@ -217,13 +217,13 @@ public final class HgAccount {
         f.put("code", xor5(code));
         if (!smsCodeKey.isEmpty()) { f.put("passport_mfa_retry_tag", "1"); f.put("sms_code_key", xor5(smsCodeKey)); }
         Map<String, Object> r = accountPost("/passport/mobile/sms_login/", f);
-        String msg = HgPlayback.str(r.get("message"));
+        String msg = LvguoPlayback.str(r.get("message"));
         if (!"success".equals(msg)) {
             // 红果风控要求本人二次验证（上行短信）：把服务端给的收件号码 / 短信内容交给界面引导用户完成
             Mfa mfa = parseMfa(lastRaw);
             if (mfa != null) { pendingMfa = mfa; pendingPhone = canonical; pendingCode = code; throw new MfaRequired(mfa); }
             Map<String, Object> data = asMap(r.get("data"));
-            String desc = data != null ? HgPlayback.str(data.get("description")) : "";
+            String desc = data != null ? LvguoPlayback.str(data.get("description")) : "";
             throw new Exception(desc.isEmpty() ? ("登录失败：" + msg) : desc);
         }
         if (!cookies.containsKey("sessionid") && !cookies.containsKey("sessionid_ss"))
@@ -345,11 +345,11 @@ public final class HgAccount {
             m.put("data", data);
             return m;
         } catch (Exception ignored) {
-            m.put("message", HgPlayback.extract(json, "message"));
-            String desc = HgPlayback.extract(json, "description");
+            m.put("message", LvguoPlayback.extract(json, "message"));
+            String desc = LvguoPlayback.extract(json, "description");
             Map<String, Object> data = new LinkedHashMap<>();
             if (!desc.isEmpty()) data.put("description", desc);
-            String key = HgPlayback.extract(json, "sms_code_key");
+            String key = LvguoPlayback.extract(json, "sms_code_key");
             if (!key.isEmpty()) data.put("sms_code_key", key);
             m.put("data", data);
             return m;

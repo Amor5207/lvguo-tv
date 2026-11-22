@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"lvguo/internal/hg"
+	"lvguo/internal/lvguo"
 )
 
 const (
@@ -67,7 +67,7 @@ type library struct {
 
 	histMu   sync.Mutex
 	histAt   time.Time
-	histList []hg.Entry
+	histList []lvguo.Entry
 }
 
 func (s *Server) libraryPath(id string) string {
@@ -108,7 +108,7 @@ func (l *library) setGuestMetadata(id, title, cover string, count int) error {
 	return errors.New("观看记录不存在")
 }
 
-func (s *Server) guestHistory(code, cookie string, limit int) []hg.Entry {
+func (s *Server) guestHistory(code, cookie string, limit int) []lvguo.Entry {
 	l := s.guestLibrary(code)
 	l.mu.Lock()
 	rows := make([]libRow, 0, len(l.rows))
@@ -125,9 +125,9 @@ func (s *Server) guestHistory(code, cookie string, limit int) []hg.Entry {
 		}
 	}
 	summaries := s.content.HistorySummaries(cookie, missing)
-	out := make([]hg.Entry, 0, len(rows))
+	out := make([]lvguo.Entry, 0, len(rows))
 	for _, r := range rows {
-		e := hg.Entry{SeriesID: r.SeriesID, Vid: r.Vid, EpisodeIndex: r.Index, PositionMs: r.Pos, Time: r.TS, Title: r.Title, Cover: r.Cover, EpisodeCount: r.Count}
+		e := lvguo.Entry{SeriesID: r.SeriesID, Vid: r.Vid, EpisodeIndex: r.Index, PositionMs: r.Pos, Time: r.TS, Title: r.Title, Cover: r.Cover, EpisodeCount: r.Count}
 		if e.Title == "" {
 			if d, ok := summaries[r.SeriesID]; ok {
 				e.Title, e.Cover, e.EpisodeCount = d.Title, d.Cover, d.EpisodeCount
@@ -296,10 +296,10 @@ func chunks(rows []libRow) [][]libRow {
 	return out
 }
 
-func toProgress(rows []libRow) []hg.ProgressRow {
-	out := make([]hg.ProgressRow, len(rows))
+func toProgress(rows []libRow) []lvguo.ProgressRow {
+	out := make([]lvguo.ProgressRow, len(rows))
 	for i, r := range rows {
-		out[i] = hg.ProgressRow{SeriesID: r.SeriesID, Vid: r.Vid, Index: r.Index, Pos: r.Pos, TS: r.TS, Watched: r.Watched}
+		out[i] = lvguo.ProgressRow{SeriesID: r.SeriesID, Vid: r.Vid, Index: r.Index, Pos: r.Pos, TS: r.TS, Watched: r.Watched}
 	}
 	return out
 }
@@ -331,11 +331,11 @@ func (s *Server) upload(ss *sess) error {
 }
 
 // Attempt both independent endpoints; retain failed snapshots for retry.
-func uploadPending(hist, rate []libRow, reportHistory, uploadProgress func([]hg.ProgressRow) error, mark func([]libRow, bool)) error {
+func uploadPending(hist, rate []libRow, reportHistory, uploadProgress func([]lvguo.ProgressRow) error, mark func([]libRow, bool)) error {
 	var firstErr error
 	for _, c := range chunks(hist) {
 		if err := reportHistory(toProgress(c)); err != nil {
-			if errors.Is(err, hg.ErrSessionExpired) {
+			if errors.Is(err, lvguo.ErrSessionExpired) {
 				return err
 			}
 			firstErr = err
@@ -345,7 +345,7 @@ func uploadPending(hist, rate []libRow, reportHistory, uploadProgress func([]hg.
 	}
 	for _, c := range chunks(rate) {
 		if err := uploadProgress(toProgress(c)); err != nil {
-			if errors.Is(err, hg.ErrSessionExpired) {
+			if errors.Is(err, lvguo.ErrSessionExpired) {
 				return err
 			}
 			if firstErr == nil {
@@ -360,7 +360,7 @@ func uploadPending(hist, rate []libRow, reportHistory, uploadProgress func([]hg.
 
 func (s *Server) uploadAndReport(ss *sess) {
 	if err := s.upload(ss); err != nil {
-		if errors.Is(err, hg.ErrSessionExpired) {
+		if errors.Is(err, lvguo.ErrSessionExpired) {
 			s.expire(ss)
 			return
 		}
@@ -410,7 +410,7 @@ func fileExists(p string) bool {
 
 // historySnapshot coalesces simultaneous refreshes. Explicit page visits bypass the
 // short cache; callers waiting on that same refresh share its result.
-func (l *library) historySnapshot(fresh bool, load func() ([]hg.Entry, error)) ([]hg.Entry, error) {
+func (l *library) historySnapshot(fresh bool, load func() ([]lvguo.Entry, error)) ([]lvguo.Entry, error) {
 	requested := time.Now()
 	l.histMu.Lock()
 	defer l.histMu.Unlock()
@@ -419,17 +419,17 @@ func (l *library) historySnapshot(fresh bool, load func() ([]hg.Entry, error)) (
 		if err != nil {
 			return nil, err
 		}
-		l.histList = append([]hg.Entry{}, h...)
+		l.histList = append([]lvguo.Entry{}, h...)
 		l.histAt = time.Now()
 	}
-	return append([]hg.Entry{}, l.histList...), nil
+	return append([]lvguo.Entry{}, l.histList...), nil
 }
 
 // cloudHistory merges fresh cloud progress with newer, pending local playback.
-func (s *Server) cloudHistory(ss *sess, limit int, fresh ...bool) ([]hg.Entry, error) {
+func (s *Server) cloudHistory(ss *sess, limit int, fresh ...bool) ([]lvguo.Entry, error) {
 	l := s.lib(ss)
-	list, err := l.historySnapshot(len(fresh) > 0 && fresh[0], func() ([]hg.Entry, error) {
-		var history, progress []hg.Entry
+	list, err := l.historySnapshot(len(fresh) > 0 && fresh[0], func() ([]lvguo.Entry, error) {
+		var history, progress []lvguo.Entry
 		var historyErr, progressErr error
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -483,8 +483,8 @@ func (s *Server) cloudHistory(ss *sess, limit int, fresh ...bool) ([]hg.Entry, e
 // Timestamp-only changes in the progress store are common and must not move
 // old history to the top. A newer episode or materially different position is
 // evidence of playback; locally deleted entries are filtered in overlay.
-func mergeCloudHistory(history, progress []hg.Entry) []hg.Entry {
-	out := append([]hg.Entry(nil), history...)
+func mergeCloudHistory(history, progress []lvguo.Entry) []lvguo.Entry {
+	out := append([]lvguo.Entry(nil), history...)
 	at := make(map[string]int, len(out))
 	for i, e := range out {
 		if _, ok := at[e.SeriesID]; !ok {
@@ -513,7 +513,7 @@ func mergeCloudHistory(history, progress []hg.Entry) []hg.Entry {
 	return out
 }
 
-func (s *Server) overlay(ss *sess, list []hg.Entry) []hg.Entry {
+func (s *Server) overlay(ss *sess, list []lvguo.Entry) []lvguo.Entry {
 	l := s.lib(ss)
 	l.mu.Lock()
 	local := make([]libRow, 0, len(l.rows))
@@ -567,7 +567,7 @@ func (s *Server) overlay(ss *sess, list []hg.Entry) []hg.Entry {
 			// Uploaded local snapshots must not resurrect entries absent from the cloud.
 			continue
 		}
-		e := hg.Entry{SeriesID: r.SeriesID, Vid: r.Vid, EpisodeIndex: r.Index, PositionMs: r.Pos, Time: r.TS, Title: r.Title, Cover: r.Cover, EpisodeCount: r.Count}
+		e := lvguo.Entry{SeriesID: r.SeriesID, Vid: r.Vid, EpisodeIndex: r.Index, PositionMs: r.Pos, Time: r.TS, Title: r.Title, Cover: r.Cover, EpisodeCount: r.Count}
 		if e.Title == "" {
 			if d, err := s.content.Detail(s.cookie(ss), r.SeriesID); err == nil && d != nil {
 				e.Title, e.Cover, e.EpisodeCount = d.Title, d.Cover, len(d.Episodes)

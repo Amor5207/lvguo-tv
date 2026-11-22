@@ -1,4 +1,4 @@
-package hgplay
+package lvguoplay
 
 // Legacy route: signed POST to /novel/player/multi_video_model/v1/. Upstream
 // serves this older path for registered anonymous devices while the newer
@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-const legacyMobileEndpoint = "https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/v1/"
+const legacyMobileEndpoint = "https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/player/v1/"
 
 var errLegacyModelEmpty = errors.New("legacy 返回空响应")
 
@@ -46,6 +46,12 @@ func playbackIdentity(ctx context.Context) (miniReelDevice, error) {
 }
 
 func PlayLegacy(ctx context.Context, vid string) (map[string]any, error) {
+	return PlayMultiModel(ctx, vid, "player")
+}
+
+// PlayMultiModel 按动态配置指定的 dr_scene 路径走纯 Go V5 签名取流。
+// drScene 非空时请求 /novel/player/multi_video_model/<drScene>/v1/，为空时请求 /v1/。
+func PlayMultiModel(ctx context.Context, vid, drScene string) (map[string]any, error) {
 	if !validID(vid) {
 		return nil, errors.New("视频编号无效")
 	}
@@ -53,7 +59,13 @@ func PlayLegacy(ctx context.Context, vid string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	model, err := requestLegacy(ctx, vid, playbackConfig.snapshot().Legacy, d, nil)
+	cfg := playbackConfig.snapshot().Legacy
+	if drScene != "" {
+		cfg.Endpoint = "https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/" + drScene + "/v1/"
+	} else {
+		cfg.Endpoint = "https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/v1/"
+	}
+	model, err := requestLegacy(ctx, vid, cfg, d, nil)
 	if !errors.Is(err, errLegacyModelEmpty) || ctx.Err() != nil {
 		return model, err
 	}
@@ -74,15 +86,18 @@ func PlayLegacy(ctx context.Context, vid string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return requestLegacy(ctx, vid, playbackConfig.snapshot().Legacy, d, nil)
+	return requestLegacy(ctx, vid, cfg, d, nil)
 }
 
 func requestLegacy(ctx context.Context, vid string, cfg PlaybackRouteConfig, d miniReelDevice, client *http.Client) (map[string]any, error) {
 	if !validID(vid) || cfg.NeedAll == nil {
 		return nil, errors.New("播放参数无效")
 	}
-	// 2026-11-20 起服务端把 dr_scene 从路径移进请求体：不带它的旧格式仍回 200，但内容为空。
-	payload := fmt.Sprintf(`{"biz_param":{"detail_page_version":0,"device_level":%d,"disable_digg_stat":false,"disable_video_relate_book":false,"need_all_video_definition":%t,"need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":%d},"mixed_video_id_map":{"1004":["%s"]},"dr_scene":"player"}`, cfg.DeviceLevel, *cfg.NeedAll, cfg.VideoPlatform, vid)
+	endpoint := cfg.Endpoint
+	if endpoint == "" {
+		endpoint = legacyMobileEndpoint
+	}
+	payload := fmt.Sprintf(`{"biz_param":{"detail_page_version":0,"device_level":%d,"disable_digg_stat":false,"disable_video_relate_book":false,"need_all_video_definition":%t,"need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":%d},"mixed_video_id_map":{"1004":["%s"]},"video_id":"%s","content_type":1}`, cfg.DeviceLevel, *cfg.NeedAll, cfg.VideoPlatform, vid, vid)
 	var b bytes.Buffer
 	z := gzip.NewWriter(&b)
 	if _, err := z.Write([]byte(payload)); err != nil {
@@ -91,24 +106,17 @@ func requestLegacy(ctx context.Context, vid string, cfg PlaybackRouteConfig, d m
 	if err := z.Close(); err != nil {
 		return nil, err
 	}
-	// 参数顺序与 7.4.3.32 客户端一致（2026-11-20 抓包）；服务端校验签名时会回看这份查询串。
 	p := sign.Params{
-		{K: "device_platform", V: "android"}, {K: "os", V: "android"}, {K: "ssmix", V: "a"}, {K: "_rticket", V: ""},
-		{K: "cdid", V: d.cdid}, {K: "channel", V: "xiaomi_8662_64"}, {K: "aid", V: "8662"}, {K: "app_name", V: "novelread"},
-		{K: "version_code", V: "74332"}, {K: "version_name", V: "7.4.3.32"}, {K: "manifest_version_code", V: "74332"},
-		{K: "update_version_code", V: "74332"}, {K: "resolution", V: "1200*2670"}, {K: "dpi", V: "460"},
-		{K: "device_type", V: "23127PN0CC"}, {K: "device_brand", V: "Xiaomi"}, {K: "language", V: "zh"},
-		{K: "os_api", V: "34"}, {K: "os_version", V: "14"}, {K: "ac", V: "wifi"}, {K: "host_abi", V: "arm64-v8a"},
-		{K: "dragon_device_type", V: "phone"}, {K: "pv_player", V: "74332"}, {K: "compliance_status", V: "0"},
-		{K: "need_personal_recommend", V: "1"}, {K: "player_so_load", V: "1"}, {K: "is_android_pad_screen", V: "0"},
-		{K: "iid", V: d.installID}, {K: "device_id", V: d.deviceID},
+		{K: "aid", V: "8662"}, {K: "app_name", V: "novelread"}, {K: "version_code", V: "74332"}, {K: "version_name", V: "7.4.3.32"},
+		{K: "channel", V: "vivo_8662_64"}, {K: "device_platform", V: "android"}, {K: "device_type", V: "PGT-AN10"}, {K: "os_version", V: "12"},
+		{K: "update_version_code", V: "74332"}, {K: "iid", V: d.installID}, {K: "cdid", V: d.cdid}, {K: "device_id", V: d.deviceID}, {K: "_rticket", V: "0"},
 	}
 	signer, err := sign.NewPlaybackSigner(d.deviceID, "7.4.3.32")
 	if err != nil {
 		return nil, err
 	}
 	ticket := time.Now().UnixMilli()
-	signed, err := signer.SignMobileV5(cfg.Endpoint, p, b.Bytes(), ticket, nil)
+	signed, err := signer.SignMobileV5(endpoint, p, b.Bytes(), ticket, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -116,21 +124,14 @@ func requestLegacy(ctx context.Context, vid string, cfg PlaybackRouteConfig, d m
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "com.phoenix.read/74332 (Linux; U; Android 14; zh_CN; 23127PN0CC; Build/UKQ1.230804.001; Cronet/TTNetVersion:8d40f833 2026-03-03 QuicVersion:21ac1950 2025-11-18)")
-	req.Header.Set("Accept", "application/json; charset=utf-8,application/x-protobuf")
+	req.Header.Set("User-Agent", "com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)")
+	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
-	req.Header.Set("x-xs-from-web", "0")
-	req.Header.Set("x-ss-dp", "8662")
-	req.Header.Set("lc", "101")
-	req.Header.Set("x-reading-request", fmt.Sprintf("%d-%d", ticket, time.Now().UnixNano()&0x7fffffff))
-	if d.cookie != "" {
-		req.Header.Set("Cookie", d.cookie)
-	}
 	for _, h := range signed.Headers {
 		req.Header.Set(h[0], h[1])
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		client = videoTabHTTPClient
 	}
 	resp, err := client.Do(req)
 	if err != nil {

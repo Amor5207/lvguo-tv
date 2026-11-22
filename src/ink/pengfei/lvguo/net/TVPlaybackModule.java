@@ -19,7 +19,7 @@ import java.security.spec.X509EncodedKeySpec;
 import java.util.Locale;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import ink.pengfei.lvguo.net.hgsign.HgPlayback;
+import ink.pengfei.lvguo.net.lvguosign.LvguoPlayback;
 
 /** Authenticated, replaceable TV playback module. Never executes unsigned downloads. */
 public final class TVPlaybackModule {
@@ -30,8 +30,8 @@ public final class TVPlaybackModule {
     private static Context app;
     private static volatile java.util.concurrent.Future<?> startup;
     private static final class Loaded {
-        final int revision; final Object instance; final Method prepare, normalize;
-        Loaded(int revision, Object instance, Method prepare, Method normalize) {this.revision=revision;this.instance=instance;this.prepare=prepare;this.normalize=normalize;}
+        final int revision; final Object instance; final Method prepare, prepareRoute, normalize;
+        Loaded(int revision, Object instance, Method prepare, Method prepareRoute, Method normalize) {this.revision=revision;this.instance=instance;this.prepare=prepare;this.prepareRoute=prepareRoute;this.normalize=normalize;}
     }
     private TVPlaybackModule() {}
     public static void init(Context context) {
@@ -49,6 +49,8 @@ public final class TVPlaybackModule {
                 byte[] cachedMeta=stored.getString("manifest").getBytes(StandardCharsets.UTF_8), cachedDex=Base64.decode(stored.getString("dex"),Base64.DEFAULT);
                 Loaded cached=load(cachedMeta,cachedDex); if(cached.revision>initial.revision)active=cached;
             } catch(Throwable ignored) { }
+            // 后台预注册匿名播放设备，避免首次点播冷启动多等 1~2 秒。
+            ink.pengfei.lvguo.App.io().execute(()->{ try { LvguoPlayback.moduleIdentity(); } catch(Throwable ignored) { } });
         } catch(Throwable e){Log.e("TVPlaybackModule","Could not load built-in playback module",e);}
     }
     private static byte[] asset(String path,int limit)throws Exception {try(InputStream in=app.getAssets().open(path)){return read(in,limit);}}
@@ -68,8 +70,9 @@ public final class TVPlaybackModule {
         boolean goodFile=false; if(file.isFile()) { try(FileInputStream in=new FileInputStream(file)) { goodFile=sha.equals(hex(MessageDigest.getInstance("SHA-256").digest(read(in,MAX_MODULE)))); } catch(Exception ignored) { } }
         if(!goodFile){AtomicFile atomic=new AtomicFile(file);FileOutputStream stream=atomic.startWrite();try{stream.write(dex);atomic.finishWrite(stream);}catch(Throwable e){atomic.failWrite(stream);throw e;}}
         DexClassLoader loader=new DexClassLoader(file.getAbsolutePath(),dir.getAbsolutePath(),null,app.getClassLoader());Class<?> cls=loader.loadClass("com.hongguotv.core.PlaybackModule");Object instance=cls.getConstructor().newInstance();Method prepare=cls.getMethod("prepare",String.class,String.class),normalize=cls.getMethod("normalize",String.class,String.class);
+        Method prepareRoute=null;try{prepareRoute=cls.getMethod("prepareRoute",String.class,String.class,String.class,String.class);}catch(NoSuchMethodException ignored){}
         String probe=(String)normalize.invoke(instance,"123456", "{\"code\":0,\"data\":{\"1004\":{\"123456\":{\"video_model\":{\"video_list\":[{\"main_url\":\"https://example.test/video\"}]}}}}}");if(new JSONObject(probe).getJSONObject("data").optJSONObject("123456")==null)throw new IOException("module self-test failed");
-        return new Loaded(version,instance,prepare,normalize);
+        return new Loaded(version,instance,prepare,prepareRoute,normalize);
     }
     private static String hex(byte[] b){StringBuilder s=new StringBuilder();for(byte x:b)s.append(String.format(Locale.ROOT,"%02x",x&255));return s.toString();}
     private static void refresh() {
@@ -83,14 +86,45 @@ public final class TVPlaybackModule {
     }
     /** 当前生效的签名播放模块版本；0 表示内置模块加载失败。 */
     public static int revision() { Loaded m=active; return m==null?0:m.revision; }
-    public static String play(String vid)throws Exception {
+    private static volatile String lastGoodRoute;
+    private static volatile long lastGoodRouteAt;
+
+    public static String play(String vid) throws Exception { return play(vid, PlaybackConfig.get()); }
+
+    public static String play(String vid, PlaybackConfig cfg) throws Exception {
         Loaded module=active;
         if(module==null && startup!=null) { try { startup.get(15,TimeUnit.SECONDS); } catch(Exception ignored) { } module=active; }
         if(module==null)throw new IOException("playback module unavailable");
-        JSONObject request=new JSONObject((String)module.prepare.invoke(module.instance,vid,HgPlayback.moduleIdentity()));URL u=new URL(request.getString("url"));String host=u.getHost().toLowerCase(Locale.ROOT);
+        if(module.prepareRoute==null){
+            return executePrepared(module,vid,(String)module.prepare.invoke(module.instance,vid,LvguoPlayback.moduleIdentity()));
+        }
+        java.util.List<String> base=(cfg!=null && !cfg.routes.isEmpty())?cfg.routes:java.util.Arrays.asList("dynamic","videotab","legacy");
+        String drScene=(cfg!=null && cfg.drScene!=null && !cfg.drScene.isEmpty())?cfg.drScene:"default";
+        java.util.List<String> order=new java.util.ArrayList<>(base.size());
+        String fav=lastGoodRoute;
+        if(fav!=null && System.currentTimeMillis()-lastGoodRouteAt<10*60*1000L && base.contains(fav))order.add(fav);
+        for(String r:base)if(!order.contains(r))order.add(r);
+        Exception lastErr=null;
+        for(String route:order){
+            try{
+                String reqJson=(String)module.prepareRoute.invoke(module.instance,route,vid,LvguoPlayback.moduleIdentity(),drScene);
+                String out=executePrepared(module,vid,reqJson);
+                lastGoodRoute=route;lastGoodRouteAt=System.currentTimeMillis();
+                Log.i("TVPlaybackModule","route="+route+" ok vid="+vid);
+                return out;
+            }catch(Exception e){
+                lastErr=e;
+                Log.w("TVPlaybackModule","route="+route+" failed: "+e.getMessage());
+            }
+        }
+        throw lastErr!=null?lastErr:new IOException("all local playback routes failed");
+    }
+
+    private static String executePrepared(Loaded module,String vid,String requestJson)throws Exception {
+        JSONObject request=new JSONObject(requestJson);URL u=new URL(request.getString("url"));String host=u.getHost().toLowerCase(Locale.ROOT);
         if(!"https".equals(u.getProtocol())||!host.endsWith(".fqnovel.com")||u.getPort()!=-1||u.getUserInfo()!=null||u.getRef()!=null)throw new IOException("invalid upstream URL");
         byte[] body=Base64.decode(request.optString("body",""),Base64.DEFAULT);if(body.length>65536)throw new IOException("playback request too large");
         String method=request.optString("method",body.length>0?"POST":"GET");
-        HttpURLConnection c=(HttpURLConnection)u.openConnection();try{c.setRequestMethod(method);c.setDoOutput(body.length>0);c.setInstanceFollowRedirects(false);c.setConnectTimeout(8000);c.setReadTimeout(12000);JSONObject headers=request.getJSONObject("headers");java.util.Iterator<String> names=headers.keys();while(names.hasNext()){String key=names.next();if(!key.equalsIgnoreCase("cookie")&&!key.equalsIgnoreCase("host")&&!key.equalsIgnoreCase("content-length"))c.setRequestProperty(key,headers.getString(key));}if(body.length>0){try(OutputStream out=c.getOutputStream()){out.write(body);}}if(c.getResponseCode()!=200)throw new IOException("playback HTTP "+c.getResponseCode());String response;try(InputStream in=c.getInputStream()){response=new String(read(in,MAX_JSON),StandardCharsets.UTF_8);}if(response.trim().isEmpty()){HgPlayback.rotateModuleIdentity();throw new IOException("empty playback response");}return (String)module.normalize.invoke(module.instance,vid,response);}finally{c.disconnect();}
+        HttpURLConnection c=(HttpURLConnection)u.openConnection();try{c.setRequestMethod(method);c.setDoOutput(body.length>0);c.setInstanceFollowRedirects(false);c.setConnectTimeout(8000);c.setReadTimeout(12000);JSONObject headers=request.getJSONObject("headers");java.util.Iterator<String> names=headers.keys();while(names.hasNext()){String key=names.next();if(!key.equalsIgnoreCase("cookie")&&!key.equalsIgnoreCase("host")&&!key.equalsIgnoreCase("content-length"))c.setRequestProperty(key,headers.getString(key));}if(body.length>0){try(OutputStream out=c.getOutputStream()){out.write(body);}}if(c.getResponseCode()!=200)throw new IOException("playback HTTP "+c.getResponseCode());String response;try(InputStream in=c.getInputStream()){response=new String(read(in,MAX_JSON),StandardCharsets.UTF_8);}if(response.trim().isEmpty()){LvguoPlayback.rotateModuleIdentity();throw new IOException("empty playback response");}return (String)module.normalize.invoke(module.instance,vid,response);}finally{c.disconnect();}
     }
 }

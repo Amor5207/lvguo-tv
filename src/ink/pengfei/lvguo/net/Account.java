@@ -441,7 +441,7 @@ public final class Account {
     }
 
     /**
-     * 写 read_history/update。必须用完整签名（HgCloud）：旧签名或不带签名的写请求，
+     * 写 read_history/update。必须用完整签名（LvguoCloud）：旧签名或不带签名的写请求，
      * 服务端同样回 code 0，但会被静默丢弃，记录进不了观看历史。
      */
     private static JSONObject historyUpdate(JSONObject body) throws Exception {
@@ -453,7 +453,7 @@ public final class Account {
         String[] login = loginDevice();
         String[] dev = login != null ? login : device();
         String[] ids = login != null ? new String[]{login[2], login[3]} : cloudIds();
-        String text = ink.pengfei.lvguo.net.hgsign.HgCloud.postJson(APP_HOST, path, dev[0], dev[1], ids[0], ids[1],
+        String text = ink.pengfei.lvguo.net.lvguosign.LvguoCloud.postJson(APP_HOST, path, dev[0], dev[1], ids[0], ids[1],
                 Session.cookieHeaderForGeneration(generation), body.toString().getBytes("UTF-8"));
         Response r = new Response();
         r.status = 200; r.body = text.getBytes("UTF-8");
@@ -787,10 +787,13 @@ public final class Account {
             JSONObject sd = row.optJSONObject("subscribe_data");
             if (sd == null) sd = new JSONObject();
             Entry e = new Entry();
-            e.seriesId = firstNonEmpty(row.optString("item_id"), sd.optString("series_id"));
+            e.online = row.optBoolean("is_online", online);
+            // 已上线剧集优先取 subscribe_data.series_id（真实可播剧 ID），避免打开已失效的预约占位 item_id。
+            e.seriesId = e.online
+                    ? firstNonEmpty(sd.optString("series_id"), row.optString("item_id"))
+                    : firstNonEmpty(row.optString("item_id"), sd.optString("series_id"));
             e.title = firstNonEmpty(sd.optString("title"), firstNonEmpty(row.optString("name"), row.optString("title")));
             e.cover = firstNonEmpty(sd.optString("cover"), row.optString("cover"));
-            e.online = row.optBoolean("is_online", online);
             e.desc = firstNonEmpty(sd.optString("video_desc"), row.optString("item_desc"));
             e.episodeCount = sd.optInt("episode_cnt");
             e.episodeIndex = Math.max(0, sd.optInt("episode") - 1);

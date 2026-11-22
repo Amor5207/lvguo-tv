@@ -1,12 +1,12 @@
-package ink.pengfei.lvguo.net.hgsign;
+package ink.pengfei.lvguo.net.lvguosign;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
 /** 红果播放签名（纯 Java 移植自 aston314/hongguo-tv 的 Go 实现，对拍测试向量验证）。 */
-public final class HgSign {
-    private HgSign() {}
+public final class LvguoSign {
+    private LvguoSign() {}
 
     // ---------- 基础工具 ----------
     static byte[] hex(String s) {

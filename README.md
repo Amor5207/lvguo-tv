@@ -8,12 +8,12 @@
 
 红果短剧第三方 **Android 电视 / 投影仪客户端** 与 **桌面网页版**
 
-[![Version](https://img.shields.io/badge/version-2.0.4-2ea44f?style=flat-square)](https://github.com/Amor5207/lvguo-tv/releases/latest)
+[![Version](https://img.shields.io/badge/version-2.0.5-2ea44f?style=flat-square)](https://github.com/Amor5207/lvguo-tv/releases/latest)
 [![Android](https://img.shields.io/badge/Android-6.0%2B-3ddc84?style=flat-square&logo=android&logoColor=white)](#系统要求与安装)
 [![Arch](https://img.shields.io/badge/arch-ARMv7%20%7C%20ARM64%20%7C%20x86%20%7C%20x86__64-16a34a?style=flat-square)](https://github.com/Amor5207/lvguo-tv/releases/latest)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
 
-[官网体验](https://lvguo.pengfei.ink) · [下载 2.0.4](https://github.com/Amor5207/lvguo-tv/releases/latest) · [界面预览](#界面预览) · [功能特性](#功能特性) · [构建项目](#构建项目) · [致谢](#致谢)
+[官网体验](https://lvguo.pengfei.ink) · [下载 2.0.5](https://github.com/Amor5207/lvguo-tv/releases/latest) · [界面预览](#界面预览) · [功能特性](#功能特性) · [构建项目](#构建项目) · [致谢](#致谢)
 
 <br>
 
@@ -146,8 +146,8 @@
 
 | 项目 | 数值 |
 | --- | --- |
-| 当前版本 | `2.0.4` |
-| 内部版本号 | `2004` |
+| 当前版本 | `2.0.5` |
+| 内部版本号 | `2005` |
 | Android 包名 | `ink.pengfei.lvguo` |
 | 官网 | [https://lvguo.pengfei.ink](https://lvguo.pengfei.ink) |
 
@@ -164,7 +164,7 @@
 | 解码能力 | 需设备支持 H.265（HEVC）硬件解码 |
 | 架构兼容 | 纯 Java 实现，32 位 / 64 位 ARM 与 x86 通用 |
 
-1. 从 [Releases](https://github.com/Amor5207/lvguo-tv/releases/latest) 下载 `LvguoTV-2.0.4.apk`。
+1. 从 [Releases](https://github.com/Amor5207/lvguo-tv/releases/latest) 下载 `LvguoTV-2.0.5.apk`。
 2. 安装到电视或投影仪后，通过红果 App 扫码或手机号验证码登录即可开始浏览与播放。
 3. 使用手机遥控时需确保手机与电视处于同一局域网（仅建议在可信局域网内使用）。
 
@@ -199,17 +199,17 @@ gradle assembleDebug
 或使用独立 SDK 构建脚本：
 
 ```shell
-LVGUO_VERSION_NAME=2.0.4 LVGUO_VERSION_CODE=2004 python3 build_local.py
+LVGUO_VERSION_NAME=2.0.5 LVGUO_VERSION_CODE=2005 python3 build_local.py
 ```
 
 ### 网页端（32 位 / 64 位交叉编译）
 
 ```shell
 cd web
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=2.0.4" -o dist/lvguo-linux-amd64 ./cmd/lvguo
-CGO_ENABLED=0 GOOS=linux GOARCH=386   go build -trimpath -ldflags="-s -w -X main.version=2.0.4" -o dist/lvguo-linux-386   ./cmd/lvguo
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=2.0.4" -o dist/lvguo-linux-arm64 ./cmd/lvguo
-CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w -X main.version=2.0.4" -o dist/lvguo-linux-armv7 ./cmd/lvguo
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=2.0.5" -o dist/lvguo-linux-amd64 ./cmd/lvguo
+CGO_ENABLED=0 GOOS=linux GOARCH=386   go build -trimpath -ldflags="-s -w -X main.version=2.0.5" -o dist/lvguo-linux-386   ./cmd/lvguo
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=2.0.5" -o dist/lvguo-linux-arm64 ./cmd/lvguo
+CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w -X main.version=2.0.5" -o dist/lvguo-linux-armv7 ./cmd/lvguo
 ```
 
 ---

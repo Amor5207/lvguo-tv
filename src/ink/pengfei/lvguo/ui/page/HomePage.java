@@ -406,23 +406,43 @@ public class HomePage extends Page {
         grid.showLoading(); loadMore(); loadChannels();
     }
 
-    /** 继续观看：本地历史前 12 部，点卡片直接从上次位置续播。 */
+    private String lastContinueSig = "";
+    private String lastContinueTopId = "";
+
+    /** 继续观看：本地历史前 12 部，点卡片直接从上次位置续播。无变化时不重建，避免返回时闪烁割裂。 */
     private void renderContinue() {
         List<Store.Item> history = Store.history();
-        boolean hadFocus = resumeRow.hasFocusInside();
-        resumeRow.clear();
         Map<String, Series> catalog = new HashMap<>();
         List<Series> cached = Catalog.cached();
         if (cached != null) for (Series s : cached) catalog.put(s.seriesId, s);
-        int n = 0;
+        final List<Store.Item> visibleItems = new ArrayList<>();
         final List<Series> unfinished = new ArrayList<>();
         final java.util.Set<String> completedIds = Store.completedIds();
+        StringBuilder sig = new StringBuilder();
         for (final Store.Item item : history) {
             // 已经整部看完的不再出现在「继续观看」（看到最后一集，或标记过已看完）
             if (completedIds.contains(item.seriesId)) continue;
             if (item.episodeCount > 0 && item.lastEpisode >= item.episodeCount && (item.durationMs <= 0 || item.positionMs >= item.durationMs - 15000)) continue;
-            if (n++ >= SHELF_MAX) { unfinished.add(seriesOf(item)); continue; }
             unfinished.add(seriesOf(item));
+            if (visibleItems.size() < SHELF_MAX) {
+                visibleItems.add(item);
+                String prog = MePage.progress(item);
+                sig.append(item.seriesId).append(':').append(item.episodeIndex).append(':').append(prog == null ? "" : prog).append('|');
+            }
+        }
+        sig.append('#').append(unfinished.size());
+        String nextSig = sig.toString();
+        if (nextSig.equals(lastContinueSig) && resumeRow.size() > 0 == !visibleItems.isEmpty()) return;
+        String nextTopId = visibleItems.isEmpty() ? "" : visibleItems.get(0).seriesId;
+        boolean topChanged = !lastContinueTopId.isEmpty() && !nextTopId.isEmpty() && !nextTopId.equals(lastContinueTopId);
+        lastContinueSig = nextSig;
+        lastContinueTopId = nextTopId;
+
+        boolean hadFocus = resumeRow.hasFocusInside();
+        resumeRow.clear();
+        int n = 0;
+        for (final Store.Item item : visibleItems) {
+            n++;
             final Series s = new Series();
             Series known = catalog.get(item.seriesId);
             s.seriesId = item.seriesId; s.title = item.title;
@@ -432,6 +452,7 @@ public class HomePage extends Page {
             String prog = MePage.progress(item);
             if (prog != null) card.setBadge(prog);   // 进度压在封面右下角，标题下不再放文字
             card.setOnFocused(() -> { billboardFromUser = true; showInfo(s, item.lastEpisode > 0 ? "继续观看 · 第 " + item.lastEpisode + " 集" : "继续观看"); snapTo(card); });
+            card.setOnHighlighted(() -> ink.pengfei.lvguo.media.PlaybackWarmup.schedule(s.seriesId));
             card.setOnClickListener(v -> {
                 Intent intent = new Intent(host, ink.pengfei.lvguo.PlayerActivity.class);
                 intent.putExtra("series_id", item.seriesId); intent.putExtra("title", item.title);
@@ -447,8 +468,18 @@ public class HomePage extends Page {
             resumeRow.add(card);
         }
         if (unfinished.size() > SHELF_MAX) addMoreTile(resumeRow, "继续观看", c -> new ink.pengfei.lvguo.ui.page.ListPage.Chunk(unfinished, unfinished.size(), false), unfinished, unfinished.size() - SHELF_MAX);
-        resumeSection.setVisibility(resumeRow.size() > 0 ? View.VISIBLE : View.GONE);
-        if (hadFocus && resumeRow.size() > 0 && !resumeRow.focusRemembered()) resumeRow.focusFirst();
+        boolean show = resumeRow.size() > 0;
+        resumeSection.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (show && topChanged) {
+            resumeRow.smoothScrollTo(0, 0);
+            resumeSection.setAlpha(0.86f);
+            resumeSection.animate().cancel();
+            resumeSection.animate().alpha(1f).setDuration(180).start();
+        }
+        if (hadFocus && show) {
+            if (topChanged) resumeRow.focusFirst();
+            else if (!resumeRow.focusRemembered()) resumeRow.focusFirst();
+        }
         if (!billboardFromUser && !history.isEmpty()) {
             Store.Item top = history.get(0);
             Series s = new Series(); s.seriesId = top.seriesId; s.title = top.title; s.cover = Store.bestCover(top.seriesId, top.cover);

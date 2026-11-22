@@ -1,4 +1,4 @@
-package hgplay
+package lvguoplay
 
 // The single-episode protocol is deliberately isolated from account requests
 // and the legacy POST's profile.
@@ -62,4 +62,3 @@ func registerMiniReelSingleDeviceAt(ctx context.Context, base string, httpClient
 	}
 	return miniReelDevice{deviceID: c.session.DeviceID, installID: c.session.InstallID, cdid: d.CDID, openUDID: d.OpenUDID, cookie: miniReelPlaybackCookieHeader(c.session.Cookies)}, nil
 }
-

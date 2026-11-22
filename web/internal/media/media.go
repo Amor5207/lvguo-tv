@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"lvguo/internal/cenc"
-	"lvguo/internal/hg"
+	"lvguo/internal/lvguo"
 	"lvguo/internal/nativestream"
 )
 
@@ -173,9 +173,9 @@ func (m *Cache) Get(key string, load func() ([]byte, error)) ([]byte, error) {
 }
 
 // Fetch 取单集指定清晰度的播放地址，下载并解密。
-func Fetch(c *hg.Content, a *hg.Account, vid, def string) ([]byte, error) {
+func Fetch(c *lvguo.Content, a *lvguo.Account, vid, def string) ([]byte, error) {
 	attempt := 0
-	return fetchWithRetries(vid, def, func() ([]hg.Gear, error) {
+	return fetchWithRetries(vid, def, func() ([]lvguo.Gear, error) {
 		if attempt > 0 {
 			c.ForgetPlay(vid)
 		}
@@ -184,7 +184,7 @@ func Fetch(c *hg.Content, a *hg.Account, vid, def string) ([]byte, error) {
 	}, a.RefreshPlaybackSession, download)
 }
 
-type modelLoader func() ([]hg.Gear, error)
+type modelLoader func() ([]lvguo.Gear, error)
 type profileRefresher func() error
 type mediaDownloader func(string) ([]byte, error)
 
@@ -193,7 +193,7 @@ type mediaDownloader func(string) ([]byte, error)
 // failed rounds registers a fresh anonymous playback identity.
 func fetchWithRetries(vid, def string, load modelLoader, rotate profileRefresher, get mediaDownloader) ([]byte, error) {
 	var last error
-	var selected hg.Gear
+	var selected lvguo.Gear
 	for round := 0; round < 3; round++ {
 		if round == 2 && rotate != nil {
 			if err := rotate(); err != nil {
@@ -257,13 +257,8 @@ func fetchWithRetries(vid, def string, load modelLoader, rotate profileRefresher
 	return nil, fmt.Errorf("视频暂时无法播放：%v", last)
 }
 
-func selectGear(gears []hg.Gear, definition string) *hg.Gear {
-	for i := range gears {
-		if gears[i].Definition == definition {
-			return &gears[i]
-		}
-	}
-	return hg.PickGear(gears, "", 1080)
+func selectGear(gears []lvguo.Gear, definition string) *lvguo.Gear {
+	return lvguo.PickGear(gears, definition, 1080)
 }
 
 func uniqueURLs(values []string) []string {
@@ -290,7 +285,7 @@ func expiredMediaURL(err error) bool {
 
 func download(u string) ([]byte, error) {
 	req, _ := http.NewRequest("GET", u, nil)
-	req.Header.Set("User-Agent", hg.ContentUA)
+	req.Header.Set("User-Agent", lvguo.ContentUA)
 	res, err := (&http.Client{Timeout: 3 * time.Minute}).Do(req)
 	if err != nil {
 		return nil, err
@@ -305,7 +300,7 @@ func download(u string) ([]byte, error) {
 // Path 是视频地址的形式：/media/<vid>.mp4?q=<清晰度>
 var Path = regexp.MustCompile(`^/media/(\d{6,24})\.mp4$`)
 
-func (m *Cache) openStream(c *hg.Content, a *hg.Account, vid, def string) (*nativestream.Source, error) {
+func (m *Cache) openStream(c *lvguo.Content, a *lvguo.Account, vid, def string) (*nativestream.Source, error) {
 	key := vid + "|" + def
 	now := time.Now()
 	m.smu.Lock()
@@ -377,7 +372,7 @@ func (m *Cache) openStream(c *hg.Content, a *hg.Account, vid, def string) (*nati
 	return src, err
 }
 
-func (m *Cache) loadStream(c *hg.Content, a *hg.Account, vid, def string) (*nativestream.Source, error) {
+func (m *Cache) loadStream(c *lvguo.Content, a *lvguo.Account, vid, def string) (*nativestream.Source, error) {
 	cl := m.client
 	if cl == nil {
 		cl = defaultStreamClient
@@ -405,7 +400,7 @@ func (m *Cache) loadStream(c *hg.Content, a *hg.Account, vid, def string) (*nati
 }
 
 // WarmStream 提前打开流式解密句柄并预取首片，降低切集/刷剧首帧等待。
-func (m *Cache) WarmStream(c *hg.Content, a *hg.Account, vid, def string) {
+func (m *Cache) WarmStream(c *lvguo.Content, a *lvguo.Account, vid, def string) {
 	if vid == "" || m.HasPlayable(vid+"|"+def) {
 		return
 	}
@@ -413,7 +408,7 @@ func (m *Cache) WarmStream(c *hg.Content, a *hg.Account, vid, def string) {
 }
 
 // Serve 处理一次 /media/ 请求，支持 Range。
-func (m *Cache) Serve(c *hg.Content, a *hg.Account, w http.ResponseWriter, r *http.Request) {
+func (m *Cache) Serve(c *lvguo.Content, a *lvguo.Account, w http.ResponseWriter, r *http.Request) {
 	mm := Path.FindStringSubmatch(r.URL.Path)
 	if mm == nil {
 		http.Error(w, "地址无效", http.StatusNotFound)

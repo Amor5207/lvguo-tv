@@ -4,10 +4,12 @@ package com.hongguotv.core
 import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLDecoder
 import java.security.MessageDigest
+import java.util.zip.GZIPOutputStream
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -38,6 +40,41 @@ class PlaybackModule {
         headers.put("User-Agent", "com.phoenix.read/73932 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)")
         headers.put("Accept", "application/json")
         return JSONObject().put("url", signed.url).put("headers", headers).toString()
+    }
+
+    /** 多线路本地签名取流：支持 dynamic（按 drScene 拼路径）、videotab（GET）、legacy（/player/v1/ POST）。 */
+    fun prepareRoute(route: String, vid: String, identity: String, drScene: String): String {
+        if (route == "videotab") return prepare(vid, identity)
+        require(vid.matches(Regex("[0-9]{6,24}")))
+        val dev = JSONObject(identity)
+        val now = System.currentTimeMillis()
+        val scene = if (route == "legacy") "player" else drScene.trim().ifEmpty { "default" }
+        val safeScene = if (scene.matches(Regex("[A-Za-z0-9_-]{1,32}"))) scene else "default"
+        val endpoint = "https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/$safeScene/v1/"
+        val payload = "{\"biz_param\":{\"detail_page_version\":0,\"device_level\":1,\"disable_digg_stat\":false,\"disable_video_relate_book\":false,\"need_all_video_definition\":true,\"need_mp4_align\":false,\"use_os_player\":false,\"use_server_dns\":false,\"video_platform\":1024},\"mixed_video_id_map\":{\"1004\":[\"$vid\"]},\"video_id\":\"$vid\",\"content_type\":1}"
+        val gz = ByteArrayOutputStream().also { out ->
+            GZIPOutputStream(out).use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+        }.toByteArray()
+        val params = linkedMapOf(
+            "aid" to "8662", "app_name" to "novelread",
+            "version_code" to "74332", "version_name" to "7.4.3.32",
+            "channel" to "vivo_8662_64", "device_platform" to "android",
+            "device_type" to "PGT-AN10", "os_version" to "12",
+            "update_version_code" to "74332",
+            "iid" to dev.getString("iid"), "cdid" to dev.getString("cdid"), "device_id" to dev.getString("device_id"),
+            "_rticket" to "0",
+        )
+        val signed = signer.signPlayback(endpoint, params, gz, now)
+        val headers = JSONObject(signed.headers)
+        headers.put("User-Agent", "com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)")
+        headers.put("Accept", "application/json")
+        headers.put("Content-Encoding", "gzip")
+        return JSONObject()
+            .put("url", signed.url)
+            .put("method", "POST")
+            .put("body", Base64.encodeToString(gz, Base64.NO_WRAP))
+            .put("headers", headers)
+            .toString()
     }
     fun normalize(vid: String, response: String): String {
         val root = JSONObject(response); require(root.optInt("code", 0) == 0)

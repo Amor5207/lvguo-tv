@@ -1,4 +1,4 @@
-package hgplay
+package lvguoplay
 
 import (
 	"bytes"

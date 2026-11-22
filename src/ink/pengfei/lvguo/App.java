@@ -30,10 +30,9 @@ public final class App extends Application {
     public void onCreate() {
         super.onCreate();
         sInst = this;
-        sPool = Executors.newFixedThreadPool(3);
-        // IO 线程池：图片/接口/缓存读写。TV 盒子 CPU 弱，线程数不宜多，
-        // 4 条足够覆盖"首页 3 个请求 + 若干封面"，再多只会互相抢 CPU。
-        sIo = Executors.newFixedThreadPool(4);
+        sPool = Executors.newFixedThreadPool(4);
+        // IO 线程池：接口/播放源/预热与图片并发执行，8 条线程避免封面下载把播放接口堵死。
+        sIo = Executors.newFixedThreadPool(8);
         mPrefs = getSharedPreferences("lvguo", Context.MODE_PRIVATE);
         try {
             android.content.pm.PackageInfo packageInfo = getPackageManager().getPackageInfo(getPackageName(), 0);

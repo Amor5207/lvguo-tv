@@ -1,4 +1,4 @@
-package ink.pengfei.lvguo.net.hgsign;
+package ink.pengfei.lvguo.net.lvguosign;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -11,8 +11,8 @@ import javax.crypto.spec.SecretKeySpec;
  * 取流请求专用的 X-Argus / X-Ladon（移植自 aston314/hongguo-tv 的 playback_sign.go）。
  * 2026-11 起服务端不再接受「时间戳占位」的这两个头，缺少真实值时 video_model 返回空响应。
  */
-final class HgPlaySign {
-    private HgPlaySign() {}
+final class LvguoPlaySign {
+    private LvguoPlaySign() {}
     private static final String LICENSE_ID = "1611921764";
 
     private static long le64(byte[] d, int at) {
@@ -30,18 +30,18 @@ final class HgPlaySign {
         for (int i = data.length; i < out.length; i++) out[i] = (byte) n;
         return out;
     }
-    private static void varint(HgSign.Proto p, int field, long u32) {
+    private static void varint(LvguoSign.Proto p, int field, long u32) {
         p.uvarint((long) field << 3);
         p.uvarint(u32 & 0xFFFFFFFFL);
     }
     /** 与 Proto.text 不同：空值也写出（长度 0），和上游逐字节一致。 */
-    private static void text(HgSign.Proto p, int field, String value) {
+    private static void text(LvguoSign.Proto p, int field, String value) {
         byte[] b = (value == null ? "" : value).getBytes(StandardCharsets.UTF_8);
         p.uvarint((long) (field << 3 | 2));
         p.uvarint(b.length);
         p.b.write(b, 0, b.length);
     }
-    private static void rawBlob(HgSign.Proto p, int field, byte[] d) {
+    private static void rawBlob(LvguoSign.Proto p, int field, byte[] d) {
         p.uvarint((long) (field << 3 | 2));
         p.uvarint(d.length);
         p.b.write(d, 0, d.length);
@@ -49,7 +49,7 @@ final class HgPlaySign {
 
     private static long[] simonKeys() {
         long[] keys = new long[72];
-        byte[] raw = HgSign.hex("fc78e0a9657a0c748ce51559903ccf03510e51d3cff232d71343e88a321c5304");
+        byte[] raw = LvguoSign.hex("fc78e0a9657a0c748ce51559903ccf03510e51d3cff232d71343e88a321c5304");
         for (int i = 0; i < 4; i++) keys[i] = le64(raw, i * 8);
         final long sequence = 0x3dc94c3a046d678bL;
         for (int i = 4; i < keys.length; i++) {
@@ -61,7 +61,7 @@ final class HgPlaySign {
 
     static String argus(String query, Map<String, String> q, byte[] body, int ts, int nonce) throws Exception {
         String aid = q.get("aid") == null || q.get("aid").isEmpty() ? "1967" : q.get("aid");
-        HgSign.Proto p = new HgSign.Proto(), counters = new HgSign.Proto(), device = new HgSign.Proto();
+        LvguoSign.Proto p = new LvguoSign.Proto(), counters = new LvguoSign.Proto(), device = new LvguoSign.Proto();
         varint(p, 1, 1077940818L); varint(p, 2, 2); varint(p, 3, nonce);
         text(p, 4, aid);
         text(p, 5, q.get("device_id"));
@@ -72,10 +72,10 @@ final class HgPlaySign {
         rawBlob(p, 10, new byte[8]);
         varint(p, 11, 0);
         varint(p, 12, ((long) ts << 1));
-        byte[] m = body != null && body.length > 0 ? HgSign.md5(body) : new byte[16];
-        byte[] bodyHash = HgSign.sm3(m);
+        byte[] m = body != null && body.length > 0 ? LvguoSign.md5(body) : new byte[16];
+        byte[] bodyHash = LvguoSign.sm3(m);
         byte[] queryBytes = query.isEmpty() ? new byte[16] : query.getBytes(StandardCharsets.UTF_8);
-        byte[] queryHash = HgSign.sm3(queryBytes);
+        byte[] queryHash = LvguoSign.sm3(queryBytes);
         rawBlob(p, 13, java.util.Arrays.copyOf(bodyHash, 6));
         rawBlob(p, 14, java.util.Arrays.copyOf(queryHash, 6));
         varint(counters, 1, 1); varint(counters, 2, 1); varint(counters, 3, 1); varint(counters, 7, 0xc792ecccL);
@@ -112,20 +112,20 @@ final class HgPlaySign {
         ext[frame.length] = 0x61; ext[frame.length + 1] = 0x6f;
         byte[] padded = pad(ext);
         Cipher c = Cipher.getInstance("AES/CBC/NoPadding");
-        c.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(HgSign.hex("d31e3718288a1027baab59f146a09a9c"), "AES"),
-                new IvParameterSpec(HgSign.hex("ea180a0336ed352fcd24e4d50018ae54")));
+        c.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(LvguoSign.hex("d31e3718288a1027baab59f146a09a9c"), "AES"),
+                new IvParameterSpec(LvguoSign.hex("ea180a0336ed352fcd24e4d50018ae54")));
         byte[] enc = c.doFinal(padded);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         out.write(0xf2); out.write(0x81); out.write(enc, 0, enc.length);
-        return HgSign.b64(out.toByteArray());
+        return LvguoSign.b64(out.toByteArray());
     }
 
     static String ladon(int ts, String aid, int nonce) throws Exception {
-        byte[] seed = HgSign.le32(nonce);
+        byte[] seed = LvguoSign.le32(nonce);
         byte[] aidBytes = aid.getBytes(StandardCharsets.UTF_8);
         byte[] in = new byte[4 + aidBytes.length];
         System.arraycopy(seed, 0, in, 0, 4); System.arraycopy(aidBytes, 0, in, 4, aidBytes.length);
-        byte[] hexKey = HgSign.toHex(HgSign.md5(in)).getBytes(StandardCharsets.US_ASCII);
+        byte[] hexKey = LvguoSign.toHex(LvguoSign.md5(in)).getBytes(StandardCharsets.US_ASCII);
         long[] keys = new long[34];
         long k = le64(hexKey, 0);
         long p0 = le64(hexKey, 8), p1 = le64(hexKey, 16), p2 = le64(hexKey, 24);
@@ -146,6 +146,6 @@ final class HgPlaySign {
         }
         byte[] out = new byte[4 + plain.length];
         System.arraycopy(seed, 0, out, 0, 4); System.arraycopy(plain, 0, out, 4, plain.length);
-        return HgSign.b64(out);
+        return LvguoSign.b64(out);
     }
 }

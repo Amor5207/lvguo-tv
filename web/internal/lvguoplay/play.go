@@ -1,4 +1,4 @@
-package hgplay
+package lvguoplay
 
 // Play 是本包对外的唯一入口：注册匿名设备 → 用纯 Go 签名请求 video_model →
 // 返回上游原始 JSON（由调用方按已有逻辑解析为播放档位）。
@@ -76,7 +76,7 @@ func requestVideoModel(ctx context.Context, vid string, device miniReelDevice, c
 
 	httpClient := client
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 12 * time.Second, CheckRedirect: func(r *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}
+		httpClient = videoTabHTTPClient
 	}
 	resp, err := httpClient.Do(request)
 	if err != nil {

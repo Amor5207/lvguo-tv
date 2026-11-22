@@ -15,7 +15,7 @@ import ink.pengfei.lvguo.media.VideoDecoderSupport;
 import ink.pengfei.lvguo.media.StreamingSource;
 import ink.pengfei.lvguo.model.Episode;
 import ink.pengfei.lvguo.model.Gear;
-import ink.pengfei.lvguo.net.HgApi;
+import ink.pengfei.lvguo.net.LvguoApi;
 import ink.pengfei.lvguo.net.Repo;
 import ink.pengfei.lvguo.store.Store;
 import ink.pengfei.lvguo.ui.IconView;
@@ -325,7 +325,10 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
     private void playbackTile(TextView view,boolean focused,boolean selected,int radius){
         int fill=focused?0xFFF5F5F7:selected?Ui.PRIMARY:0x22FFFFFF;
         view.setBackground(Ui.round(this,fill,radius));
-        view.setTextColor(focused||selected?0xFF111113:0xFFFFFFFF);
+        // 白色焦点底配深色字；绿色主题色底与深色底统一配白色字与白色图标，和首页风格一致。
+        int fg=focused?0xFF111113:0xFFFFFFFF;
+        view.setTextColor(fg);
+        Ui.tintIcons(view,fg);
         view.setTypeface(null,focused||selected?Typeface.BOLD:Typeface.NORMAL);
     }
     private void showChrome() {
@@ -393,9 +396,21 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
             });}
         });
     }
+    private boolean feedHadHistory, feedHistoryCommitted;
+    private boolean feedCanRecordHistory(int epIndex, int posMs, int durMs) {
+        if (!feedMode) return true;
+        // 刷剧模式：只看第 1 集（未进第 2 集）绝不入历史记录，避免刷剧把历史记录弄乱；已有历史或进入第 2 集才记录。
+        if (feedHistoryCommitted || feedHadHistory || epIndex >= 1) {
+            feedHistoryCommitted = true;
+            return true;
+        }
+        return false;
+    }
     private void applyLoadedSeries(Repo.Detail detail,int selected,String vid,int episodeNo){
         seriesDetail=detail;episodes=detail.episodes;
         if(seriesTitle==null || seriesTitle.isEmpty())seriesTitle=detail.title;
+        feedHadHistory=Store.watched(seriesId)!=null;
+        feedHistoryCommitted=!feedMode || feedHadHistory || selected>=1;
         index=selected;
         if(vid!=null && !vid.isEmpty()){
             boolean found=false;
@@ -410,7 +425,7 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
     }
     private List<Gear> gearsFor(Episode episode) throws Exception {
         String vid=episode.vid;
-        FutureTask<List<Gear>> created=new FutureTask<>(()->Repo.play(vid,HgApi.DEVICE_LEVEL_H265));
+        FutureTask<List<Gear>> created=new FutureTask<>(()->Repo.play(vid,LvguoApi.DEVICE_LEVEL_H265));
         FutureTask<List<Gear>> existing=models.putIfAbsent(vid,created);
         FutureTask<List<Gear>> task=existing==null?created:existing;
         try {
@@ -673,10 +688,12 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
         setLoading(true,restartMessage!=null?restartMessage:"正在准备播放…");
 
         restoreChrome(visibleBefore,focusedBefore);
-        Store.markHistory(seriesId,seriesTitle,episode.index,index,episode.vid,
-                playbackIntent().getStringExtra(EXTRA_COVER));
+        if (feedCanRecordHistory(index, 0, 0)) {
+            Store.markHistory(seriesId,seriesTitle,episode.index,index,episode.vid,
+                    playbackIntent().getStringExtra(EXTRA_COVER));
+        }
         if(android.os.Build.VERSION.SDK_INT>28){
-            List<Gear> memGears=Repo.memoryPlay(episode.vid,HgApi.DEVICE_LEVEL_H265);
+            List<Gear> memGears=Repo.memoryPlay(episode.vid,LvguoApi.DEVICE_LEVEL_H265);
             if(memGears!=null){
                 synchronized(qualityChoices){qualityChoices.remove(episode.vid);qualityChoices.put(episode.vid,memGears);while(qualityChoices.size()>6)qualityChoices.remove(qualityChoices.keySet().iterator().next());}
                 Gear gear=pickPlaybackGear(memGears);
@@ -1026,6 +1043,7 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
         StreamingSource nextStream=queuedStream;
 
         // Persist the outgoing episode before history moves to the incoming episode.
+        feedHistoryCommitted=true;
         Store.progress(seriesId,previousIndex,Math.max(0,oldPosition),Math.max(lastKnownDuration,oldPosition));
         ink.pengfei.lvguo.net.LibrarySync.flushProgress();
         media.removePlayedEpisodes();
@@ -1218,7 +1236,16 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
     }
     private void savePlaybackPosition(){
         if(!prepared || !firstFrame || player==null || episodes==null || index<0 || index>=episodes.size())return;
-        try{Store.progress(seriesId,index,player.getCurrentPosition(),player.getDuration());progressSavedAt=android.os.SystemClock.elapsedRealtime();}catch(IllegalStateException ignored){}
+        try{
+            int pos=player.getCurrentPosition(),dur=player.getDuration();
+            boolean wasCommitted=feedHistoryCommitted;
+            if(!feedCanRecordHistory(index,pos,dur))return;
+            if(feedMode && !wasCommitted){
+                Episode ep=episodes.get(index);
+                Store.markHistory(seriesId,seriesTitle,ep.index,index,ep.vid,playbackIntent().getStringExtra(EXTRA_COVER));
+            }
+            Store.progress(seriesId,index,pos,dur);progressSavedAt=android.os.SystemClock.elapsedRealtime();
+        }catch(IllegalStateException ignored){}
     }
     private void setTimes(int position,int duration){
         if(feedMode || feedLayer!=null)time.setText(formatTime(position)+" / "+(duration>0?formatTime(duration):"--:--"));
@@ -1357,7 +1384,7 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
         revealControls();ui.removeCallbacks(hideTask);
     }
     private Gear pickPlaybackGear(List<Gear> gears){
-        List<Gear> compatible=VideoDecoderSupport.compatibleHevc(gears);
+        List<Gear> compatible=VideoDecoderSupport.compatible(gears);
         Gear highestAvailable=Repo.pickGear(compatible,null,Integer.MAX_VALUE);
         if(highestAvailable==null){forcedAboveCeiling=false;return null;}
         Gear chosen=Repo.pickGear(compatible,prefer==null?"720p":prefer,effectiveCeiling());
@@ -1433,7 +1460,7 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
         ui.removeCallbacks(hideTask);toast("正在读取可用清晰度");
         App.io().execute(()->{try{
             List<Gear> all=gearsFor(episode);TreeMap<Integer,Gear> choices=new TreeMap<>(Collections.reverseOrder());
-            for(Gear gear:VideoDecoderSupport.compatibleHevc(all))if(gear.shortSide()>0 && gear.shortSide()<=effectiveCeiling() && !choices.containsKey(gear.shortSide()))choices.put(gear.shortSide(),gear);
+            for(Gear gear:VideoDecoderSupport.compatible(all))if(gear.shortSide()>0 && gear.shortSide()<=effectiveCeiling() && !choices.containsKey(gear.shortSide()))choices.put(gear.shortSide(),gear);
             List<Gear> gears=new ArrayList<>(choices.values());
             ui.post(()->{if(destroyed || request!=sequence)return;
                 List<String> labels=new ArrayList<>();int selected=0;
@@ -1480,17 +1507,7 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
         paintFeedActions();
     }
     private void openSeasons(){
-        if(seriesDetail==null)return;final int request=sequence;final String id=seriesId,album=seriesDetail.relatedAlbumId;
-        toast("正在载入各季…");App.io().execute(()->{try{
-            List<Repo.Season> all=Repo.seasons(id,album),available=new ArrayList<>();List<String> labels=new ArrayList<>();int selected=0;
-            for(Repo.Season season:all)if(season.episodes>0){if(id.equals(season.id))selected=available.size();available.add(season);labels.add("第 "+season.number+" 季 · "+season.episodes+"集 · "+season.title);}
-            final int choice=selected;ui.post(()->{if(destroyed || request!=sequence)return;
-                options("切换季",labels,choice,n->{Repo.Season season=available.get(n);if(id.equals(season.id))return;
-                    android.content.Intent intent=new android.content.Intent(this,PlayerActivity.class);
-                    intent.putExtra(EXTRA_SERIES,season.id).putExtra(EXTRA_TITLE,season.title).putExtra(EXTRA_COVER,season.cover).putExtra(EXTRA_INDEX,0);startActivity(intent);
-                });
-            });
-        }catch(Exception error){ui.post(()->{if(request==sequence && !destroyed)toast("各季加载失败，请重试");});}});
+        openEpisodes(true);
     }
     private void openComments(){showComments(true);}
     private void showComments(boolean episode){
@@ -1518,55 +1535,99 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
             });
     }
 
+    private String browseSeriesId;
+    private Repo.Detail browseDetail;
+    private List<Episode> browseEpisodes;
+    private List<Repo.Season> browseSeasons;
+    private int browseSeasonRequest, episodeOverlayGen;
+    private LinearLayout episodeDetailBox, episodeSeasonTabs, episodeRangeTabsHost;
+    private HorizontalScrollView episodeSeasonScroll;
+    private android.widget.ImageView episodeDetailCover;
+    private TextView episodeDetailTitle, episodeDetailMeta, episodeDetailIntro, episodePlayingStatus, episodeCountText;
+    private final List<TextView> seasonTabViews = new ArrayList<>();
+    private android.animation.ObjectAnimator seasonSkeletonAnimator;
+
     private boolean isEpisodeOpen() { return episodeOverlay!=null && episodeOverlay.getVisibility()==View.VISIBLE; }
-    private void openEpisodes(){
+    private void openEpisodes(){ openEpisodes(false); }
+    private void openEpisodes(final boolean focusSeasons){
         if(episodes==null || episodes.isEmpty() || isEpisodeOpen())return;
+        episodeOverlayGen++;
         episodeChromeBefore=chromeVisible;
         hideChrome();episodeOverlay.removeAllViews();episodeCells.clear();
-        episodeSheet=Ui.column(this);episodeSheet.setClickable(true);Ui.padding(episodeSheet,28,26,28,22);
+        browseSeriesId=seriesId;browseDetail=seriesDetail;browseEpisodes=episodes;browseSeasons=null;browseSeasonRequest++;
+        seasonTabViews.clear();rangeTabs.clear();
+        episodeSheet=Ui.column(this);episodeSheet.setClickable(true);Ui.padding(episodeSheet,26,22,26,20);
         episodeSheet.setBackground(Ui.roundStroke(this,0xEB1C1C1F,28,0x1FFFFFFF,1));
-        LinearLayout header=Ui.row(this);header.addView(text("选集",24,0xFFFFFFFF,true));
-        TextView count=text("共 "+episodes.size()+" 集",15,0x99FFFFFF,false);LinearLayout.LayoutParams cl=Ui.lp(0,-2,1);cl.leftMargin=dp(10);header.addView(count,cl);
-        // 直接输入集数：遥控器数字键随时可按；没有数字键时用「输入集数」小键盘
-        jumpHint=text("按数字键直接跳集",14,0x80FFFFFF,false);jumpHint.setSingleLine(true);
+
+        // 1. 顶栏：选集 + 集数 + 输入集数 + 收起
+        LinearLayout header=Ui.row(this);header.addView(text("选集",22,0xFFFFFFFF,true));
+        episodeCountText=text("共 "+browseEpisodes.size()+" 集",14,0x99FFFFFF,false);
+        LinearLayout.LayoutParams cl=Ui.lp(0,-2,1);cl.leftMargin=dp(10);header.addView(episodeCountText,cl);
+        jumpHint=text("按数字键直接跳集",13,0x80FFFFFF,false);jumpHint.setSingleLine(true);
         jumpBuffer="";
-        TextView locate=Ui.action(this,"输入集数",-1,false);
-        playbackButtonState(locate,false);locate.setOnFocusChangeListener((v,f)->playbackButtonState(locate,f));locate.setOnClickListener(v->showKeypad());header.addView(locate,Ui.lp(-2,dp(42)));
-        TextView close=Ui.action(this,"收起",IconView.CLOSE,false);close.setId(View.generateViewId());playbackButtonState(close,false);close.setOnFocusChangeListener((v,f)->playbackButtonState(close,f));close.setOnClickListener(v->closeEpisodes());header.addView(close,Ui.lp(-2,dp(42)));
-        ((LinearLayout.LayoutParams)close.getLayoutParams()).leftMargin=dp(10);
-        episodeSheet.addView(header,Ui.lp(-1,dp(44)));
+        final TextView locate=Ui.action(this,"输入集数",-1,false);
+        playbackButtonState(locate,false);locate.setOnFocusChangeListener((v,f)->playbackButtonState(locate,f));locate.setOnClickListener(v->showKeypad());header.addView(locate,Ui.lp(-2,dp(40)));
+        final TextView close=Ui.action(this,"收起",IconView.CLOSE,false);close.setId(View.generateViewId());playbackButtonState(close,false);close.setOnFocusChangeListener((v,f)->playbackButtonState(close,f));close.setOnClickListener(v->closeEpisodes());header.addView(close,Ui.lp(-2,dp(40)));
+        ((LinearLayout.LayoutParams)close.getLayoutParams()).leftMargin=dp(8);
+        episodeSheet.addView(header,Ui.lp(-1,dp(42)));
+
+        // 2. 当前浏览季详情卡片（切换季时仅更新这里与下方选集，不影响当前播放）
+        episodeDetailBox=Ui.column(this);
+        episodeDetailBox.setBackground(Ui.roundStroke(this,0x14FFFFFF,14,0x18FFFFFF,1));
+        Ui.padding(episodeDetailBox,12,10,12,10);
+        LinearLayout detailRow=Ui.row(this);
+        detailRow.setGravity(Gravity.CENTER_VERTICAL);
+        episodeDetailCover=new android.widget.ImageView(this);
+        episodeDetailCover.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+        episodeDetailCover.setBackground(Ui.round(this,0x22FFFFFF,8));
+        episodeDetailCover.setClipToOutline(true);
+        detailRow.addView(episodeDetailCover,Ui.lp(dp(50),dp(68)));
+        LinearLayout detailMetaCol=Ui.column(this);
+        LinearLayout.LayoutParams dml=Ui.lp(0,-2,1);dml.leftMargin=dp(12);
+        episodeDetailTitle=text("",15,0xFFFFFFFF,true);episodeDetailTitle.setSingleLine(true);episodeDetailTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        episodeDetailMeta=text("",12,0xAAFFFFFF,false);episodeDetailMeta.setSingleLine(true);episodeDetailMeta.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        episodeDetailIntro=text("",12,0x88FFFFFF,false);episodeDetailIntro.setMaxLines(2);episodeDetailIntro.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        detailMetaCol.addView(episodeDetailTitle,Ui.lp(-1,-2));
+        LinearLayout.LayoutParams dmtl=Ui.lp(-1,-2);dmtl.topMargin=dp(3);detailMetaCol.addView(episodeDetailMeta,dmtl);
+        LinearLayout.LayoutParams ditl=Ui.lp(-1,-2);ditl.topMargin=dp(3);detailMetaCol.addView(episodeDetailIntro,ditl);
+        detailRow.addView(detailMetaCol,dml);
+        episodeDetailBox.addView(detailRow,Ui.lp(-1,-2));
+        episodePlayingStatus=text("",12,Ui.ACCENT_TEXT,true);
+        episodePlayingStatus.setSingleLine(true);episodePlayingStatus.setVisibility(View.GONE);
+        LinearLayout.LayoutParams psl=Ui.lp(-1,-2);psl.topMargin=dp(6);episodeDetailBox.addView(episodePlayingStatus,psl);
+        LinearLayout.LayoutParams dbl=Ui.lp(-1,-2);dbl.topMargin=dp(10);
+        episodeSheet.addView(episodeDetailBox,dbl);
+        renderBrowseDetailHeader();
+
+        // 3. 季切换栏（下方是季，然后是集；切季不打断播放）
+        episodeSeasonScroll=new HorizontalScrollView(this);
+        episodeSeasonScroll.setHorizontalScrollBarEnabled(false);episodeSeasonScroll.setClipToPadding(false);
+        episodeSeasonScroll.setFillViewport(true);
+        episodeSeasonTabs=Ui.row(this);episodeSeasonScroll.addView(episodeSeasonTabs);
+        episodeSeasonScroll.setVisibility(View.GONE);
+        LinearLayout.LayoutParams ssl=Ui.lp(-1,dp(40));ssl.topMargin=dp(10);
+        episodeSheet.addView(episodeSeasonScroll,ssl);
+
         LinearLayout.LayoutParams jl=Ui.lp(-1,-2);jl.topMargin=dp(6);episodeSheet.addView(jumpHint,jl);
-        TextView tip=text("每 100 集一组",11,Ui.TEXT_3,false);Ui.padding(tip,0,8,0,12);tip.setVisibility(View.GONE);episodeSheet.addView(tip);
-        episodePage=index/100;rangeTabs.clear();
+
+        // 4. 集数分段栏
+        episodePage=index/100;
         HorizontalScrollView ranges=new HorizontalScrollView(this);ranges.setHorizontalScrollBarEnabled(false);ranges.setClipToPadding(false);
-        LinearLayout tabs=Ui.row(this);ranges.addView(tabs);
-        for(int page=0;episodes.size()>100 && page*100<episodes.size();page++){
-            final int target=page;TextView tab=Ui.action(this,(page*100+1)+"~"+Math.min(episodes.size(),page*100+100),IconView.EPISODES,false);
-            tab.setCompoundDrawables(null,null,null,null);tab.setCompoundDrawablePadding(0);
-            LinearLayout.LayoutParams tabLp=Ui.lp(-2,dp(40));tabLp.rightMargin=dp(10);Ui.padding(tab,18,0,18,0);tabs.addView(tab,tabLp);rangeTabs.add(tab);
-            tab.setOnFocusChangeListener((v,focus)->{
-                paintRangeTab(tab,focus,target==episodePage);
-                if(focus)ranges.smoothScrollTo(Math.max(0,tab.getLeft()-dp(12)),0);
-            });
-            tab.setOnClickListener(v->{selectEpisodePage(target);episodeGrid.requestFocus();episodeGrid.setSelection(target==index/100?index%100:0);});
-            tab.setOnKeyListener((v,key,event)->{
-                if(event.getAction()!=0)return false;
-                if(key==KeyEvent.KEYCODE_DPAD_DOWN){selectEpisodePage(target);episodeGrid.requestFocus();episodeGrid.setSelection(target==index/100?index%100:0);return true;}
-                if(key==KeyEvent.KEYCODE_DPAD_UP){locate.requestFocus();return true;}
-                if(key==KeyEvent.KEYCODE_DPAD_LEFT && target==0 || key==KeyEvent.KEYCODE_DPAD_RIGHT && target==rangeTabs.size()-1)return true;
-                return false;
-            });
-        }
-        ranges.setVisibility(episodes.size()>100?View.VISIBLE:View.GONE);episodeRanges=ranges;
-        LinearLayout.LayoutParams rangeLayout=Ui.lp(-1,dp(44));rangeLayout.topMargin=dp(12);episodeSheet.addView(ranges,rangeLayout);
+        episodeRangeTabsHost=Ui.row(this);ranges.addView(episodeRangeTabsHost);
+        episodeRanges=ranges;
+        LinearLayout.LayoutParams rangeLayout=Ui.lp(-1,dp(40));rangeLayout.topMargin=dp(8);episodeSheet.addView(ranges,rangeLayout);
+
+        // 5. 集数网格
         final int columns=5;
         episodeGrid=new GridView(this);episodeGrid.setNumColumns(columns);episodeGrid.setHorizontalSpacing(dp(10));episodeGrid.setVerticalSpacing(dp(10));episodeGrid.setClipToPadding(false);episodeGrid.setPadding(0,dp(4),0,dp(8));
         episodeGrid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);episodeGrid.setSelector(android.R.color.transparent);episodeGrid.setVerticalScrollBarEnabled(false);
         episodeGrid.setAdapter(new BaseAdapter(){
-            public int getCount(){return Math.min(100,episodes.size()-episodePage*100);}public Object getItem(int pos){return episodes.get(episodePage*100+pos);}public long getItemId(int pos){return episodePage*100+pos;}
+            public int getCount(){return browseEpisodes==null?0:Math.max(0,Math.min(100,browseEpisodes.size()-episodePage*100));}
+            public Object getItem(int pos){return browseEpisodes.get(episodePage*100+pos);}
+            public long getItemId(int pos){return episodePage*100+pos;}
             public View getView(int pos,View recycled,ViewGroup parent){
                 TextView cell=recycled instanceof TextView?(TextView)recycled:text("",15,Ui.TEXT,true);
-                cell.setGravity(Gravity.CENTER);cell.setLayoutParams(new AbsListView.LayoutParams(-1,dp(54)));cell.setTag(episodePage*100+pos);
+                cell.setGravity(Gravity.CENTER);cell.setLayoutParams(new AbsListView.LayoutParams(-1,dp(52)));cell.setTag(episodePage*100+pos);
                 paintEpisode(cell,episodePage*100+pos,episodeGrid.hasFocus() && episodeGrid.getSelectedItemPosition()==pos);return cell;
             }
         });
@@ -1575,30 +1636,301 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
             public void onNothingSelected(AdapterView<?> parent){}
         });
         episodeGrid.setOnFocusChangeListener((v,has)->refreshEpisodeCells());
-        episodeGrid.setOnItemClickListener((parent,view,pos,id)->{int absolute=episodePage*100+pos;if(absolute==index)closeEpisodes();else {restorePosition=0;restorePaused=false;playAt(absolute);}});
+        episodeGrid.setOnItemClickListener((parent,view,pos,id)->{
+            if(browseEpisodes==null)return;
+            int absolute=episodePage*100+pos;
+            if(absolute<0 || absolute>=browseEpisodes.size())return;
+            if(seriesId!=null && seriesId.equals(browseSeriesId)){
+                if(absolute==index)closeEpisodes();
+                else {restorePosition=0;restorePaused=false;playAt(absolute);}
+            } else if(browseDetail!=null && !browseDetail.episodes.isEmpty()){
+                switchPlayingSeason(browseSeriesId,browseDetail,absolute);
+            }
+        });
         episodeGrid.setOnKeyListener((v,key,event)->{
             if(event.getAction()!=KeyEvent.ACTION_DOWN)return false;int pos=episodeGrid.getSelectedItemPosition();
             if(key==KeyEvent.KEYCODE_DPAD_LEFT && pos%columns==0)return true;
             if(key==KeyEvent.KEYCODE_DPAD_RIGHT && (pos%columns==columns-1 || pos==episodeGrid.getCount()-1))return true;
-            if(key==KeyEvent.KEYCODE_DPAD_UP && pos<columns){if(rangeTabs.isEmpty()){locate.requestFocus();}else rangeTabs.get(episodePage).requestFocus();return true;}
+            if(key==KeyEvent.KEYCODE_DPAD_UP && pos<columns){
+                if(!rangeTabs.isEmpty()){rangeTabs.get(Math.min(episodePage,rangeTabs.size()-1)).requestFocus();return true;}
+                if(!seasonTabViews.isEmpty()){focusCurrentSeasonTab();return true;}
+                locate.requestFocus();return true;
+            }
             if(key==KeyEvent.KEYCODE_DPAD_DOWN && pos+columns>=episodeGrid.getCount())return true;
             return false;
         });
         View.OnKeyListener headerKeys=(v,key,event)->{
             if(event.getAction()!=KeyEvent.ACTION_DOWN)return false;
-            if(key==KeyEvent.KEYCODE_DPAD_DOWN){if(rangeTabs.isEmpty()){episodeGrid.requestFocus();}else rangeTabs.get(episodePage).requestFocus();return true;}
+            if(key==KeyEvent.KEYCODE_DPAD_DOWN){
+                if(!seasonTabViews.isEmpty()){focusCurrentSeasonTab();return true;}
+                if(!rangeTabs.isEmpty()){rangeTabs.get(Math.min(episodePage,rangeTabs.size()-1)).requestFocus();return true;}
+                episodeGrid.requestFocus();return true;
+            }
             if(key==KeyEvent.KEYCODE_DPAD_UP)return true;
             if(key==KeyEvent.KEYCODE_DPAD_LEFT){locate.requestFocus();return true;}
             if(key==KeyEvent.KEYCODE_DPAD_RIGHT){close.requestFocus();return true;}
             return false;
         };locate.setOnKeyListener(headerKeys);close.setOnKeyListener(headerKeys);
-        LinearLayout.LayoutParams gridLayout=Ui.lp(-1,0,1);gridLayout.topMargin=dp(12);episodeSheet.addView(episodeGrid,gridLayout);
-        int drawerWidth=Math.min(dp(440),(int)(root.getWidth()*.46f));
+        rebuildRangeTabs(locate);
+
+        LinearLayout.LayoutParams gridLayout=Ui.lp(-1,0,1);gridLayout.topMargin=dp(10);episodeSheet.addView(episodeGrid,gridLayout);
+        int drawerWidth=Math.min(dp(470),(int)(root.getWidth()*.48f));
         FrameLayout.LayoutParams panel=new FrameLayout.LayoutParams(drawerWidth,-1,Gravity.RIGHT);
-        panel.setMargins(0,dp(28),dp(40),dp(28));
+        panel.setMargins(0,dp(24),dp(36),dp(24));
         episodeOverlay.addView(episodeSheet,panel);episodeOverlay.setVisibility(View.VISIBLE);
-        episodeSheet.setTranslationX(drawerWidth+dp(40));episodeSheet.animate().translationX(0).setDuration(180).start();
+        episodeSheet.setTranslationX(drawerWidth+dp(40));episodeSheet.setAlpha(0f);
+        episodeSheet.animate().translationX(0).alpha(1f).setDuration(220)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator(2f)).start();
         episodeGrid.post(()->{selectEpisodePage(index/100);episodeGrid.requestFocus();episodeGrid.setSelection(index%100);refreshEpisodeCells();});
+
+        // 季列表：优先同步命中缓存（零闪烁），未命中先展示骨架屏占位再异步替换，避免凭空冒出导致布局跳动
+        if(seriesDetail!=null && seriesDetail.relatedAlbumId!=null && !seriesDetail.relatedAlbumId.isEmpty()){
+            final String curId=seriesId, album=seriesDetail.relatedAlbumId;
+            List<Repo.Season> cached=Repo.cachedSeasonsQuick(curId,album);
+            if(cached!=null){
+                List<Repo.Season> playable=new ArrayList<>();
+                for(Repo.Season s:cached)if(s.episodes>0 || curId.equals(s.id))playable.add(s);
+                if(playable.size()>1){
+                    browseSeasons=playable;
+                    renderSeasonTabsInDrawer(locate,focusSeasons);
+                    renderBrowseDetailHeader();
+                }
+            } else {
+                showSeasonTabsSkeleton();
+                final int req=browseSeasonRequest;
+                App.io().execute(()->{
+                    try{
+                        List<Repo.Season> all=Repo.seasonsQuick(curId,album);
+                        List<Repo.Season> playable=new ArrayList<>();
+                        for(Repo.Season s:all)if(s.episodes>0 || curId.equals(s.id))playable.add(s);
+                        ui.post(()->{
+                            if(!isEpisodeOpen() || req!=browseSeasonRequest)return;
+                            stopSeasonSkeletonAnimator();
+                            if(playable.size()<=1){
+                                episodeSeasonTabs.removeAllViews();
+                                episodeSeasonScroll.setVisibility(View.GONE);
+                                return;
+                            }
+                            browseSeasons=playable;
+                            renderSeasonTabsInDrawer(locate,focusSeasons);
+                            renderBrowseDetailHeader();
+                        });
+                    }catch(Exception ignored){
+                        ui.post(()->{
+                            if(!isEpisodeOpen() || req!=browseSeasonRequest)return;
+                            stopSeasonSkeletonAnimator();
+                            episodeSeasonTabs.removeAllViews();
+                            episodeSeasonScroll.setVisibility(View.GONE);
+                        });
+                    }
+                });
+            }
+        }
+    }
+
+    private void showSeasonTabsSkeleton(){
+        if(episodeSeasonTabs==null || episodeSeasonScroll==null)return;
+        stopSeasonSkeletonAnimator();
+        episodeSeasonTabs.removeAllViews();
+        seasonTabViews.clear();
+        for(int i=0;i<4;i++){
+            View pill=new View(this);
+            pill.setFocusable(false);
+            pill.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            pill.setBackground(Ui.round(this,0x24FFFFFF,18));
+            LinearLayout.LayoutParams lp=Ui.lp(dp(74),dp(36));
+            lp.rightMargin=dp(8);
+            episodeSeasonTabs.addView(pill,lp);
+        }
+        episodeSeasonTabs.setAlpha(0.55f);
+        episodeSeasonScroll.setVisibility(View.VISIBLE);
+        seasonSkeletonAnimator=android.animation.ObjectAnimator.ofFloat(episodeSeasonTabs,"alpha",0.45f,0.95f);
+        seasonSkeletonAnimator.setDuration(700);
+        seasonSkeletonAnimator.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+        seasonSkeletonAnimator.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        seasonSkeletonAnimator.start();
+    }
+
+    private void stopSeasonSkeletonAnimator(){
+        if(seasonSkeletonAnimator!=null){
+            seasonSkeletonAnimator.cancel();
+            seasonSkeletonAnimator=null;
+        }
+        if(episodeSeasonTabs!=null)episodeSeasonTabs.setAlpha(1f);
+    }
+
+    private void renderBrowseDetailHeader(){
+        if(episodeDetailBox==null)return;
+        Repo.Detail d=browseDetail!=null?browseDetail:seriesDetail;
+        String cover=d!=null && d.cover!=null && !d.cover.isEmpty()?d.cover:playbackIntent().getStringExtra(EXTRA_COVER);
+        if(cover!=null && !cover.isEmpty())ink.pengfei.lvguo.img.ImageLoader.load(cover,episodeDetailCover,dp(50),dp(68));
+        String t=d!=null && d.title!=null && !d.title.isEmpty()?d.title:(seriesTitle!=null?seriesTitle:"");
+        episodeDetailTitle.setText(t);
+        List<String> parts=new ArrayList<>();
+        if(browseSeasons!=null){
+            for(Repo.Season s:browseSeasons)if(s.id.equals(browseSeriesId)){parts.add("第 "+s.number+" 季");break;}
+        }
+        int eps=browseEpisodes!=null?browseEpisodes.size():0;
+        if(eps>0)parts.add("全 "+eps+" 集");
+        if(d!=null && d.playCount>0){
+            if(d.playCount>=100_000_000L)parts.add(String.format(Locale.US,"%.1f亿播放",d.playCount/1e8));
+            else if(d.playCount>=10_000L)parts.add(String.format(Locale.US,"%.1f万播放",d.playCount/1e4));
+        }
+        episodeDetailMeta.setText(android.text.TextUtils.join(" · ",parts));
+        String introText=d!=null && d.intro!=null?d.intro.trim():"";
+        episodeDetailIntro.setText(introText);
+        episodeDetailIntro.setVisibility(introText.isEmpty()?View.GONE:View.VISIBLE);
+        if(episodeCountText!=null)episodeCountText.setText("共 "+eps+" 集");
+        boolean differentSeason=seriesId!=null && browseSeriesId!=null && !seriesId.equals(browseSeriesId);
+        if(differentSeason && episodes!=null && index>=0 && index<episodes.size()){
+            String curSeasonLabel="";
+            if(browseSeasons!=null)for(Repo.Season s:browseSeasons)if(seriesId.equals(s.id)){curSeasonLabel="第 "+s.number+" 季 · ";break;}
+            episodePlayingStatus.setText("当前仍在播放："+curSeasonLabel+"第 "+episodes.get(index).index+" 集");
+            episodePlayingStatus.setVisibility(View.VISIBLE);
+        } else {
+            episodePlayingStatus.setVisibility(View.GONE);
+        }
+    }
+
+    private void renderSeasonTabsInDrawer(final View locate, boolean focusSeasons){
+        if(episodeSeasonTabs==null || browseSeasons==null || browseSeasons.size()<=1)return;
+        episodeSeasonTabs.removeAllViews();seasonTabViews.clear();
+        for(int i=0;i<browseSeasons.size();i++){
+            final int pos=i;
+            final Repo.Season s=browseSeasons.get(i);
+            final TextView tab=Ui.action(this,"第 "+s.number+" 季",-1,false);
+            tab.setCompoundDrawables(null,null,null,null);tab.setCompoundDrawablePadding(0);
+            LinearLayout.LayoutParams lp=Ui.lp(-2,dp(36));lp.rightMargin=dp(8);Ui.padding(tab,14,0,14,0);
+            episodeSeasonTabs.addView(tab,lp);seasonTabViews.add(tab);
+            boolean sel=s.id.equals(browseSeriesId);
+            paintRangeTab(tab,false,sel);
+            tab.setOnFocusChangeListener((v,focus)->{
+                paintRangeTab(tab,focus,s.id.equals(browseSeriesId));
+                if(focus)episodeSeasonScroll.smoothScrollTo(Math.max(0,tab.getLeft()-dp(12)),0);
+            });
+            tab.setOnClickListener(v->browseSeasonInDrawer(s,locate));
+            tab.setOnKeyListener((v,key,event)->{
+                if(event.getAction()!=KeyEvent.ACTION_DOWN)return false;
+                if(key==KeyEvent.KEYCODE_DPAD_UP){locate.requestFocus();return true;}
+                if(key==KeyEvent.KEYCODE_DPAD_DOWN){
+                    if(!rangeTabs.isEmpty()){rangeTabs.get(Math.min(episodePage,rangeTabs.size()-1)).requestFocus();return true;}
+                    episodeGrid.requestFocus();return true;
+                }
+                if((key==KeyEvent.KEYCODE_DPAD_LEFT && pos==0) || (key==KeyEvent.KEYCODE_DPAD_RIGHT && pos==seasonTabViews.size()-1))return true;
+                return false;
+            });
+        }
+        episodeSeasonScroll.setVisibility(View.VISIBLE);
+        if(focusSeasons)episodeSeasonScroll.post(this::focusCurrentSeasonTab);
+    }
+
+    private void focusCurrentSeasonTab(){
+        if(browseSeasons==null || seasonTabViews.isEmpty())return;
+        for(int i=0;i<browseSeasons.size() && i<seasonTabViews.size();i++){
+            if(browseSeasons.get(i).id.equals(browseSeriesId)){seasonTabViews.get(i).requestFocus();return;}
+        }
+        seasonTabViews.get(0).requestFocus();
+    }
+
+    private void paintSeasonTabsInDrawer(){
+        if(browseSeasons==null)return;
+        for(int i=0;i<browseSeasons.size() && i<seasonTabViews.size();i++){
+            TextView tab=seasonTabViews.get(i);
+            paintRangeTab(tab,tab.hasFocus(),browseSeasons.get(i).id.equals(browseSeriesId));
+        }
+    }
+
+    private void browseSeasonInDrawer(final Repo.Season season, final View locate){
+        if(season==null || season.id.equals(browseSeriesId))return;
+        final int req=++browseSeasonRequest;
+        browseSeriesId=season.id;
+        paintSeasonTabsInDrawer();
+        if(season.id.equals(seriesId) && seriesDetail!=null){
+            browseDetail=seriesDetail;browseEpisodes=episodes;
+            applyBrowsedSeasonUi(locate,index/100);
+            return;
+        }
+        Repo.Detail mem=Repo.memoryDetail(season.id);
+        if(mem!=null && !mem.episodes.isEmpty()){
+            browseDetail=mem;browseEpisodes=mem.episodes;
+            applyBrowsedSeasonUi(locate,0);
+            return;
+        }
+        episodeDetailTitle.setText(season.title!=null?season.title:"第 "+season.number+" 季");
+        episodeDetailMeta.setText("正在加载该季选集…");
+        episodeDetailIntro.setVisibility(View.GONE);
+        if(season.cover!=null && !season.cover.isEmpty())ink.pengfei.lvguo.img.ImageLoader.load(season.cover,episodeDetailCover,dp(50),dp(68));
+        App.io().execute(()->{
+            try{
+                Repo.Detail loaded=Repo.detail(season.id);
+                ui.post(()->{
+                    if(!isEpisodeOpen() || req!=browseSeasonRequest)return;
+                    browseDetail=loaded;browseEpisodes=loaded.episodes;
+                    applyBrowsedSeasonUi(locate,0);
+                });
+            }catch(Exception e){
+                ui.post(()->{
+                    if(!isEpisodeOpen() || req!=browseSeasonRequest)return;
+                    toast("该季加载失败，请重试");
+                });
+            }
+        });
+    }
+
+    private void applyBrowsedSeasonUi(View locate, int page){
+        renderBrowseDetailHeader();
+        episodeDetailBox.setAlpha(0.55f);
+        episodeDetailBox.animate().cancel();
+        episodeDetailBox.animate().alpha(1f).setDuration(160).start();
+        episodePage=page;
+        rebuildRangeTabs(locate);
+        selectEpisodePage(page);
+    }
+
+    private void rebuildRangeTabs(final View locate){
+        if(episodeRangeTabsHost==null)return;
+        episodeRangeTabsHost.removeAllViews();rangeTabs.clear();
+        int total=browseEpisodes==null?0:browseEpisodes.size();
+        final HorizontalScrollView ranges=(HorizontalScrollView)episodeRanges;
+        for(int page=0;total>100 && page*100<total;page++){
+            final int target=page;
+            TextView tab=Ui.action(this,(page*100+1)+"~"+Math.min(total,page*100+100),IconView.EPISODES,false);
+            tab.setCompoundDrawables(null,null,null,null);tab.setCompoundDrawablePadding(0);
+            LinearLayout.LayoutParams tabLp=Ui.lp(-2,dp(36));tabLp.rightMargin=dp(8);Ui.padding(tab,14,0,14,0);
+            episodeRangeTabsHost.addView(tab,tabLp);rangeTabs.add(tab);
+            tab.setOnFocusChangeListener((v,focus)->{
+                paintRangeTab(tab,focus,target==episodePage);
+                if(focus)ranges.smoothScrollTo(Math.max(0,tab.getLeft()-dp(12)),0);
+            });
+            boolean sameSeason=seriesId!=null && seriesId.equals(browseSeriesId);
+            tab.setOnClickListener(v->{selectEpisodePage(target);episodeGrid.requestFocus();episodeGrid.setSelection(sameSeason && target==index/100?index%100:0);});
+            tab.setOnKeyListener((v,key,event)->{
+                if(event.getAction()!=0)return false;
+                if(key==KeyEvent.KEYCODE_DPAD_DOWN){selectEpisodePage(target);episodeGrid.requestFocus();episodeGrid.setSelection(sameSeason && target==index/100?index%100:0);return true;}
+                if(key==KeyEvent.KEYCODE_DPAD_UP){if(!seasonTabViews.isEmpty())focusCurrentSeasonTab();else locate.requestFocus();return true;}
+                if(key==KeyEvent.KEYCODE_DPAD_LEFT && target==0 || key==KeyEvent.KEYCODE_DPAD_RIGHT && target==rangeTabs.size()-1)return true;
+                return false;
+            });
+        }
+        if(episodeRanges!=null)episodeRanges.setVisibility(total>100?View.VISIBLE:View.GONE);
+    }
+
+    private void switchPlayingSeason(String targetSeriesId, Repo.Detail targetDetail, int targetEpIndex){
+        if(targetSeriesId==null || targetDetail==null || targetDetail.episodes.isEmpty())return;
+        savePlaybackPosition();
+        ink.pengfei.lvguo.net.LibrarySync.flushProgress();
+        closeEpisodes(true,false);
+        seriesId=targetSeriesId;
+        seriesTitle=targetDetail.title;
+        seriesDetail=targetDetail;
+        episodes=targetDetail.episodes;
+        degraded=false;
+        restorePosition=0;restorePaused=false;
+        playbackIntent().putExtra(EXTRA_SERIES,seriesId).putExtra(EXTRA_TITLE,seriesTitle).putExtra(EXTRA_COVER,targetDetail.cover);
+        feedHadHistory=Store.watched(seriesId)!=null;
+        feedHistoryCommitted=!feedMode || feedHadHistory || targetEpIndex>=1;
+        paintFavorite();
+        playAt(Math.max(0,Math.min(targetEpIndex,episodes.size()-1)));
     }
     // ---------------- 直接输入集数
     private String jumpBuffer="";private TextView jumpHint;private LinearLayout keypad;private View episodeRanges;private TextView keypadDisplay;
@@ -1614,13 +1946,21 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
     private void clearJump(){jumpBuffer="";jumpPending=false;ui.removeCallbacks(jumpCommit);if(jumpHint!=null){jumpHint.setText("按数字键直接跳集");jumpHint.setTextColor(0x80FFFFFF);}}
     /** 找到对应集数并聚焦；play=true 时直接播放。 */
     private void jumpTo(boolean play){
-        if(jumpBuffer.isEmpty()||episodes==null)return;
+        List<Episode> list=browseEpisodes!=null?browseEpisodes:episodes;
+        if(jumpBuffer.isEmpty()||list==null)return;
         int n;try{n=Integer.parseInt(jumpBuffer);}catch(NumberFormatException e){clearJump();return;}
-        int target=-1;for(int i=0;i<episodes.size();i++)if(episodes.get(i).index==n){target=i;break;}
-        if(target<0 && n>=1 && n<=episodes.size())target=n-1;
+        int target=-1;for(int i=0;i<list.size();i++)if(list.get(i).index==n){target=i;break;}
+        if(target<0 && n>=1 && n<=list.size())target=n-1;
         if(target<0){jumpHint.setText("没有第 "+n+" 集");jumpHint.setTextColor(0xFFFF8A80);jumpBuffer="";return;}
         selectEpisodePage(target/100);episodeGrid.requestFocus();episodeGrid.setSelection(target%100);refreshEpisodeCells();
-        if(play){jumpBuffer="";if(target==index)closeEpisodes();else{restorePosition=0;restorePaused=false;playAt(target);}}
+        if(play){
+            jumpBuffer="";
+            if(seriesId!=null && seriesId.equals(browseSeriesId)){
+                if(target==index)closeEpisodes();else{restorePosition=0;restorePaused=false;playAt(target);}
+            } else if(browseDetail!=null){
+                switchPlayingSeason(browseSeriesId,browseDetail,target);
+            }
+        }
         else{jumpHint.setText("第 "+n+" 集 · 按确定播放");jumpBuffer="";}
     }
     private void showKeypad(){
@@ -1648,8 +1988,9 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
     }
     private void closeKeypad(){
         if(keypad==null)return;episodeSheet.removeView(keypad);keypad=null;
-        episodeGrid.setVisibility(View.VISIBLE);if(episodeRanges!=null)episodeRanges.setVisibility(episodes.size()>100?View.VISIBLE:View.GONE);
-        if(jumpBuffer.isEmpty()){episodeGrid.requestFocus();episodeGrid.setSelection(index%100);}
+        List<Episode> list=browseEpisodes!=null?browseEpisodes:episodes;
+        episodeGrid.setVisibility(View.VISIBLE);if(episodeRanges!=null)episodeRanges.setVisibility(list!=null && list.size()>100?View.VISIBLE:View.GONE);
+        if(jumpBuffer.isEmpty()){episodeGrid.requestFocus();episodeGrid.setSelection((seriesId!=null && seriesId.equals(browseSeriesId))?index%100:0);}
     }
     private void paintRangeTab(TextView tab,boolean focus,boolean selected){playbackTile(tab,focus,selected,100);}
     private void selectEpisodePage(int page){
@@ -1659,32 +2000,49 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
         refreshEpisodeCells();
     }
     private void paintEpisode(TextView cell,int position,boolean focus) {
-        boolean current=position==index;
-        Clip clip=clips.get(episodes.get(position).vid);
-        boolean ready=clip!=null && clip.exists();
-        boolean warmed=hasWarmed(episodes.get(position).vid,null);
-        String label=String.valueOf(episodes.get(position).index);
+        List<Episode> list=browseEpisodes!=null?browseEpisodes:episodes;
+        if(list==null || position<0 || position>=list.size())return;
+        boolean sameSeason=seriesId!=null && seriesId.equals(browseSeriesId);
+        boolean current=sameSeason && position==index;
+        Episode ep=list.get(position);
+        String label=String.valueOf(ep.index);
         String state=current?"播放中":"";
         android.text.SpannableString value=new android.text.SpannableString(label+(state.isEmpty()?"":"\n"+state));
         if(!state.isEmpty()) value.setSpan(new android.text.style.RelativeSizeSpan(0.65f),
                 label.length()+1,value.length(),0);
         cell.setText(value);
-        cell.setContentDescription("第"+episodes.get(position).index+"集"+(state.isEmpty()?"":"，"+state));
+        cell.setContentDescription("第"+ep.index+"集"+(state.isEmpty()?"":"，"+state));
         playbackTile(cell,focus,current,14);cell.setTextSize(17);
     }
     private void refreshEpisodeCells(){
-        if(episodeGrid==null || episodes==null)return;
+        List<Episode> list=browseEpisodes!=null?browseEpisodes:episodes;
+        if(episodeGrid==null || list==null)return;
         for(int n=0;n<episodeGrid.getChildCount();n++){
             View child=episodeGrid.getChildAt(n);if(!(child instanceof TextView) || !(child.getTag() instanceof Integer))continue;
-            int pos=(Integer)child.getTag();if(pos<episodes.size())paintEpisode((TextView)child,pos,episodeGrid.hasFocus() && pos==episodePage*100+episodeGrid.getSelectedItemPosition());
+            int pos=(Integer)child.getTag();if(pos<list.size())paintEpisode((TextView)child,pos,episodeGrid.hasFocus() && pos==episodePage*100+episodeGrid.getSelectedItemPosition());
         }
     }
-    private void closeEpisodes() {
+    private void closeEpisodes() { closeEpisodes(false, true); }
+    private void closeEpisodes(boolean immediate, final boolean restore) {
         if(!isEpisodeOpen()) return;
+        final int gen=++episodeOverlayGen;
+        browseSeasonRequest++;
+        stopSeasonSkeletonAnimator();
         if(keypad!=null){episodeSheet.removeView(keypad);keypad=null;}clearJump();
-        if(episodeSheet!=null)episodeSheet.animate().cancel();
-        episodeOverlay.setVisibility(View.GONE);
-        restoreChrome(episodeChromeBefore,episodeButton);
+        if(!immediate && episodeSheet!=null){
+            episodeSheet.animate().cancel();
+            final View sheet=episodeSheet;
+            sheet.animate().translationX(dp(80)).alpha(0f).setDuration(150)
+                    .withEndAction(()->{
+                        if(gen!=episodeOverlayGen)return;
+                        episodeOverlay.setVisibility(View.GONE);
+                        if(restore)restoreChrome(episodeChromeBefore,episodeButton);
+                    }).start();
+        } else {
+            if(episodeSheet!=null)episodeSheet.animate().cancel();
+            episodeOverlay.setVisibility(View.GONE);
+            if(restore)restoreChrome(episodeChromeBefore,episodeButton);
+        }
     }
     /** 当前焦点：getCurrentFocus() 在部分设备 / 窗口刚切换时会是空，兜底从视图树里找。 */
     private View focusedView(){View f=super.getCurrentFocus();if(f==null&&getWindow()!=null)f=getWindow().getDecorView().findFocus();return f;}
@@ -2682,7 +3040,7 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
         org.json.JSONArray result=new org.json.JSONArray();
         List<Episode> current=episodes;int at=index;if(current==null||at<0||at>=current.size())return result;
         List<Gear> choices;synchronized(qualityChoices){choices=qualityChoices.get(current.get(at).vid);}if(choices==null)return result;
-        try{TreeMap<Integer,String> sizes=new TreeMap<>();for(Gear gear:VideoDecoderSupport.compatibleHevc(choices))if(gear.definition!=null&&gear.shortSide()>0&&gear.shortSide()<=effectiveCeiling())sizes.put(gear.shortSide(),gear.definition);for(Map.Entry<Integer,String> entry:sizes.entrySet())result.put(new org.json.JSONObject().put("id",entry.getValue()).put("label",entry.getKey()+"P"));}catch(Exception ignored){}
+        try{TreeMap<Integer,String> sizes=new TreeMap<>();for(Gear gear:VideoDecoderSupport.compatible(choices))if(gear.definition!=null&&gear.shortSide()>0&&gear.shortSide()<=effectiveCeiling())sizes.put(gear.shortSide(),gear.definition);for(Map.Entry<Integer,String> entry:sizes.entrySet())result.put(new org.json.JSONObject().put("id",entry.getValue()).put("label",entry.getKey()+"P"));}catch(Exception ignored){}
         return result;
     }
     public void remoteSetting(String action,org.json.JSONObject body){

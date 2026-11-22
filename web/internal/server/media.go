@@ -15,7 +15,6 @@ func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, p)
 		return
 	}
-	// 默认不登录即可播放：取流走匿名设备签名（internal/hgplay），不需要账号。
-	_ = ss
-	s.media.Serve(s.content, s.player, w, r) // 取流用匿名身份，不带账号
+	// 登录用户优先用自己的设备与 Cookie 请求播放模型；游客和失败回退仍走匿名身份。
+	s.media.Serve(s.content, s.playerFor(ss), w, r)
 }

@@ -201,6 +201,7 @@ public class DetailPage extends Page {
         mSeasonLabel=Ui.text(ctx,"选择季度",12,Ui.TEXT_3,false);Ui.padding(mSeasonLabel,48,18,48,8);mSeasonLabel.setVisibility(View.GONE);col.addView(mSeasonLabel,Ui.lp(-1,-2));
         mSeasonScroll=new HorizontalScrollView(ctx);
         mSeasonScroll.setHorizontalScrollBarEnabled(false);
+        mSeasonScroll.setFillViewport(true);
         mSeasonScroll.setVisibility(View.GONE);
         mSeasonTabs=Ui.row(ctx);mSeasonScroll.addView(mSeasonTabs);
         LinearLayout.LayoutParams seasonsLp=Ui.lp(-1,-2);
@@ -725,7 +726,7 @@ public class DetailPage extends Page {
         mSeasonTabs.addView(new ink.pengfei.lvguo.ui.widget.SkeletonView(ctx,ink.pengfei.lvguo.ui.widget.SkeletonView.SEASONS,1,0,1),Ui.lp(-1,Ui.dp(ctx,46)));
         App.io().execute(()->{
             try{
-                java.util.List<Repo.Season> seasons=Repo.seasons(id,album);
+                java.util.List<Repo.Season> seasons=Repo.seasonsQuick(id,album);
                 host.runOnUiThread(()->{
                     if(generation!=loadGeneration || !id.equals(mSeriesId))return;
                     mSeasonRequestPending=false;

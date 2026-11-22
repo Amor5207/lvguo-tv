@@ -20,7 +20,7 @@ import java.util.Map;
  * 榜单、详情和播放器接口复用这组设备参数；是否接受请求由具体接口决定。
  * 搜索使用 OnlineSearch 的官方公开分页数据，不依赖这里的空响应端点。
  */
-public final class HgApi {
+public final class LvguoApi {
 
     public static final String HOST = "api5-normal-sinfonlinea.fqnovel.com";
 
@@ -30,7 +30,7 @@ public final class HgApi {
     private static final int TIMEOUT_CONNECT = 8000;
     private static final int TIMEOUT_READ = 12000;
 
-    private HgApi() {}
+    private LvguoApi() {}
 
     // ------------------------------------------------------------ 基础请求
 

@@ -11,7 +11,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"lvguo/internal/hgplay"
+	"lvguo/internal/lvguo"
+	"lvguo/internal/lvguoplay"
 	"lvguo/internal/server"
 	"lvguo/ui"
 )
@@ -28,7 +29,8 @@ func main() {
 		openApp("http://"+*addr+"/pc", *data)
 		return
 	}
-	hgplay.ConfigurePlayback(*data)
+	lvguoplay.ConfigurePlayback(*data)
+	lvguo.ConfigureSettings(*data)
 	srv, err := server.New(server.Config{DataDir: *data, UI: ui.FS(), Version: version})
 	if err != nil {
 		log.Fatal(err)

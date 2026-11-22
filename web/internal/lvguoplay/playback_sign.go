@@ -1,4 +1,4 @@
-package hgplay
+package lvguoplay
 
 // Playback-only 551 envelope. Account signing deliberately retains its own
 // profile. Protocol interoperability is checked against PR #92's fixed vectors;

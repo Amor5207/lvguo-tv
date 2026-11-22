@@ -1,4 +1,4 @@
-package hgplay
+package lvguoplay
 
 // Playback configuration changes route selection and supported request knobs;
 // signing code and secrets remain local. Invalid or unavailable remote config
@@ -34,28 +34,31 @@ type PlaybackConfig struct {
 
 func defaultPlaybackConfig() PlaybackConfig {
 	yes := true
-	return PlaybackConfig{Schema: 1, Revision: 0, Routes: []string{"legacy", "single"}, Legacy: PlaybackRouteConfig{Endpoint: legacyMobileEndpoint, DeviceLevel: 1, VideoPlatform: 1024, NeedAll: &yes}, Single: PlaybackRouteConfig{Endpoint: miniReelSingleEndpoint, VideoPlatform: 3, NeedAll: &yes}}
+	return PlaybackConfig{Schema: 1, Revision: 0, Routes: []string{"dynamic", "videotab", "legacy"}, Legacy: PlaybackRouteConfig{Endpoint: legacyMobileEndpoint, DeviceLevel: 1, VideoPlatform: 1024, NeedAll: &yes}, Single: PlaybackRouteConfig{Endpoint: miniReelSingleEndpoint, VideoPlatform: 3, NeedAll: &yes}}
 }
 func validPlaybackEndpoint(raw, expectedPath string) bool {
 	u, e := url.Parse(raw)
-	if e != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != expectedPath || u.Port() != "" {
+	if e != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Port() != "" {
+		return false
+	}
+	if u.Path != expectedPath && !(expectedPath == "/novel/player/multi_video_model/player/v1/" && u.Path == "/novel/player/multi_video_model/v1/") {
 		return false
 	}
 	host := strings.ToLower(u.Hostname())
 	return strings.HasSuffix(host, ".fqnovel.com") && host != ".fqnovel.com"
 }
 func (c PlaybackConfig) Validate() error {
-	if c.Schema != 1 || c.Revision < 0 || len(c.Routes) < 1 || len(c.Routes) > 2 {
+	if c.Schema != 1 || c.Revision < 0 || len(c.Routes) < 1 || len(c.Routes) > 4 {
 		return errors.New("无效的播放配置版本或路线")
 	}
 	seen := map[string]bool{}
 	for _, r := range c.Routes {
-		if (r != "legacy" && r != "single") || seen[r] {
+		if (r != "dynamic" && r != "videotab" && r != "legacy" && r != "single") || seen[r] {
 			return errors.New("不支持的播放路线")
 		}
 		seen[r] = true
 	}
-	if !validPlaybackEndpoint(c.Legacy.Endpoint, "/novel/player/multi_video_model/v1/") || !validPlaybackEndpoint(c.Single.Endpoint, "/novel/player/video_model/v1/") {
+	if !validPlaybackEndpoint(c.Legacy.Endpoint, "/novel/player/multi_video_model/player/v1/") || !validPlaybackEndpoint(c.Single.Endpoint, "/novel/player/video_model/v1/") {
 		return errors.New("不支持的播放接口地址")
 	}
 	if c.Legacy.DeviceLevel < 0 || c.Legacy.DeviceLevel > 5 || c.Legacy.VideoPlatform < 1 || c.Legacy.VideoPlatform > 10000 || c.Legacy.NeedAll == nil {

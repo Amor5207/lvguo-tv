@@ -1,4 +1,4 @@
-package hgplay
+package lvguoplay
 
 // 手机号 + 验证码登录（passport），含红果风控要求的上行短信二次验证。
 // 流程与签名同 TV 端 HgAccount，协议参照 aston314/hongguo-tv 的 passport_client。

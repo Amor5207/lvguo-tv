@@ -27,4 +27,28 @@ public final class Gear {
         }
         return 0;
     }
+
+    public boolean isH264() {
+        String c = codec == null ? "" : codec.toLowerCase(java.util.Locale.US).trim();
+        return c.equals("h264") || c.equals("avc") || c.equals("avc1") || c.contains("h.264");
+    }
+
+    public boolean isH265() {
+        String c = codec == null ? "" : codec.toLowerCase(java.util.Locale.US).trim();
+        return c.equals("h265") || c.equals("hevc") || c.contains("h.265");
+    }
+
+    /** ByteVC1/ByteVC2/VVC 需要厂商专有解码器，普通电视硬件 HEVC 解码器放不了。 */
+    public boolean isProprietary() {
+        String c = codec == null ? "" : codec.toLowerCase(java.util.Locale.US);
+        return c.contains("bytevc") || c.contains("bvc") || c.contains("vvc");
+    }
+
+    /** 数字越小越优先：H.264 最稳，H.265 次之，未知再次，ByteVC 最后。 */
+    public int codecRank() {
+        if (isH264()) return 0;
+        if (isH265()) return 1;
+        if (isProprietary()) return 3;
+        return 2;
+    }
 }

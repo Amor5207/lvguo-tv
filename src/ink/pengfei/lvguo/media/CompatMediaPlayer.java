@@ -55,12 +55,12 @@ public final class CompatMediaPlayer extends MediaPlayer {
                 .setMediaCodecSelector((mime, secure, tunneling) -> {
                     List<MediaCodecInfo> codecs = new ArrayList<>(MediaCodecSelector.DEFAULT.getDecoderInfos(mime, secure, tunneling));
                     if (!MimeTypes.VIDEO_H265.equals(mime)) return codecs;
-                    // Restrict HEVC to hardware decoders. Decoder fallback remains enabled,
-                    // but it can only move among the hardware codecs returned here.
+                    // Prefer hardware HEVC. Only when the device has no hardware H.265
+                    // decoder do we let Media3 try a system software decoder.
                     List<MediaCodecInfo> hardware = new ArrayList<>();
                     for (MediaCodecInfo codec : codecs)
                         if (codec.hardwareAccelerated && !codec.softwareOnly && !PlaybackCompatibility.isSoftware(codec.name)) hardware.add(codec);
-                    return hardware;
+                    return hardware.isEmpty() ? codecs : hardware;
                 });
         backend = new ExoPlayer.Builder(context, renderers)
                 .setLoadControl(new DefaultLoadControl.Builder().setBufferDurationsMs(5000,15000,500,1000).build()).build();

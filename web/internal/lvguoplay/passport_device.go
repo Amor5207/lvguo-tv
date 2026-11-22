@@ -1,4 +1,4 @@
-package hgplay
+package lvguoplay
 
 // Anonymous device bootstrap, matched to the desktop device_register protocol.
 // Registration never includes a phone number, login code, or account token.

@@ -427,8 +427,44 @@
     }
     function updateContinue(list) {
       var el = $('#cont', root); if (!el || !root.isConnected) return;
-      el.innerHTML = list.length ? shelf('继续观看', '/mine', '', list.slice(0, 12).map(function (c, i) { return cwMini(c, i); }).join('')) : '';
-      if (list.length) rowsReady(root);
+      var slice = (list || []).slice(0, 12);
+      if (!slice.length) { el.innerHTML = ''; return; }
+      var row = $('.row', el);
+      if (!row) {
+        el.innerHTML = shelf('继续观看', '/mine', '', slice.map(function (c, i) { return cwMini(c, i); }).join(''));
+        rowsReady(root);
+        return;
+      }
+      var existing = new Map();
+      $$(':scope > [data-cw]', row).forEach(function (node) { existing.set(node.dataset.cw, node); });
+      var prevFirst = row.firstElementChild && row.firstElementChild.dataset ? row.firstElementChild.dataset.cw : '';
+      var keep = new Set();
+      var ordered = slice.map(function (c, i) {
+        keep.add(c.seriesId);
+        var pr = c.episodeCount ? Math.min(1, (c.episodeIndex + (c.positionMs > 0 ? 0.5 : 0)) / c.episodeCount) : 0;
+        var subText = '看到第 ' + ((c.episodeIndex || 0) + 1) + ' 集' + (c.episodeCount ? ' / 共 ' + c.episodeCount + ' 集' : '');
+        var node = existing.get(c.seriesId);
+        if (node) {
+          var bar = $('.cwpb i', node); if (bar) bar.style.width = (pr * 100) + '%';
+          var t = $('.t', node); if (t && c.title && t.textContent !== c.title) t.textContent = c.title;
+          var s = $('.s', node); if (s && s.textContent !== subText) s.textContent = subText;
+          return node;
+        }
+        var tmp = document.createElement('div');
+        tmp.innerHTML = cwMini(c, i);
+        node = tmp.firstElementChild;
+        if (node) node.classList.add('cw-new');
+        return node;
+      }).filter(Boolean);
+      existing.forEach(function (node, id) { if (!keep.has(id)) node.remove(); });
+      ordered.forEach(function (node, idx) {
+        var cur = row.children[idx];
+        if (cur !== node) row.insertBefore(node, cur || null);
+      });
+      if (prevFirst && ordered[0] && ordered[0].dataset.cw !== prevFirst && row.scrollLeft > 0) {
+        row.scrollTo({ left: 0, behavior: 'smooth' });
+      }
+      arrState(row);
     }
     function historyChanged(e) { if (root.isConnected) updateContinue(e.detail && e.detail.seriesId ? mergeRecentHistory([e.detail].concat(hist)) : (e.detail || hist)); }
     window.addEventListener('lv:history', historyChanged); window.addEventListener('lv:progress', historyChanged);
@@ -871,7 +907,17 @@
         box.innerHTML = '<div class="sh2"><h2>选择季</h2><span>' + (d.seasonIndex ? '当前第 ' + d.seasonIndex + ' 季' : '') + '</span></div><div class="seasrow">' + [1, 2, 3, 4].map(function () { return '<span class="seachip sk skel"></span>'; }).join('') + '</div>';
         sec.parentNode.insertBefore(box, sec);
       }
-      api('/api/seasons', { query: { id: id } }).then(function (sr) {
+      var cachedDetailSeas = seasonsCache.get(id);
+      var seasPromise = (cachedDetailSeas && Date.now() - cachedDetailSeas.at < 600e3)
+        ? Promise.resolve({ seasons: cachedDetailSeas.list })
+        : api('/api/seasons', { query: { id: id, quick: '1' }, ttl: TTL }).then(function (sr) {
+            var list = (sr && sr.seasons) || [];
+            var entry = { at: Date.now(), list: list };
+            seasonsCache.set(id, entry);
+            list.forEach(function (x) { if (x && x.id) seasonsCache.set(x.id, entry); });
+            return sr;
+          });
+      seasPromise.then(function (sr) {
         var list = (sr && sr.seasons) || [];
         if (stripBase(location.pathname) !== '/detail/' + id) return;
         if (list.length < 2) { if (box) box.remove(); return; }
@@ -979,10 +1025,45 @@
       $$('.mtabs button', root).forEach(function (x) { x.classList.toggle('on', x.dataset.mt === cur); }); placeSeg(root);
       window.scrollTo(0, 0); draw();
     });
+    function patchHistoryGrid(list) {
+      var g = $('#mg', root);
+      if (!g || !list || !list.length) return false;
+      var render = cardOf('history');
+      var existing = new Map();
+      $$(':scope > [data-cw]', g).forEach(function (node) { existing.set(node.dataset.cw, node); });
+      if (!existing.size) return false;
+      var shownCount = Math.max(existing.size, Math.min(36, list.length));
+      var slice = list.slice(0, shownCount);
+      var keep = new Set();
+      var ordered = slice.map(function (c, i) {
+        keep.add(c.seriesId);
+        var pr = c.episodeCount ? Math.min(1, (c.episodeIndex + (c.positionMs > 0 ? 0.5 : 0)) / c.episodeCount) : 0;
+        var subText = '看到第 ' + ((c.episodeIndex || 0) + 1) + ' 集' + (c.episodeCount ? ' / 共 ' + c.episodeCount + ' 集' : '');
+        var node = existing.get(c.seriesId);
+        if (node) {
+          var bar = $('.cwpb i', node); if (bar) bar.style.width = (pr * 100) + '%';
+          var t = $('.t', node); if (t && c.title && t.textContent !== c.title) t.textContent = c.title;
+          var s = $('.s', node); if (s && s.textContent !== subText) s.textContent = subText;
+          return node;
+        }
+        var tmp = document.createElement('div');
+        tmp.innerHTML = render(c, i);
+        node = tmp.firstElementChild;
+        if (node) node.classList.add('cw-new');
+        return node;
+      }).filter(Boolean);
+      existing.forEach(function (node, id) { if (!keep.has(id)) node.remove(); });
+      ordered.forEach(function (node, idx) {
+        var curNode = g.children[idx];
+        if (curNode !== node) g.insertBefore(node, curNode || null);
+      });
+      return true;
+    }
     function syncHistory(e) {
       if (!root.isConnected) return;
-      data.history=e.detail&&e.detail.seriesId?mergeRecentHistory([e.detail].concat(data.history||[])):(e.detail||hist);
-      limited.history=data.history.length>=300;err.history=null;drawStats();if(cur==='history')draw();
+      data.history = e.detail && e.detail.seriesId ? mergeRecentHistory([e.detail].concat(data.history || [])) : (e.detail || hist);
+      limited.history = data.history.length >= 300; err.history = null; drawStats();
+      if (cur === 'history' && !patchHistoryGrid(data.history)) draw();
     }
     function libraryChanged(e) {
       if(!root.isConnected||guest)return;
@@ -1082,7 +1163,7 @@
   }
 
   // ------------------------------------------------------------ 播放器（全屏沉浸）
-  var rep = new LV.Reporter(), PL = null, afterPlayer = null, OPENING = null;
+  var rep = new LV.Reporter(), PL = null, afterPlayer = null, OPENING = null, seasonsCache = new Map();
   // Cache successful source discovery briefly; recovery bypasses this cache to force a fresh model.
   function playInfo(vid, q, force) { return api('/api/play', { query: { vid: vid, q: q, fresh: force ? '1' : undefined }, ttl: force ? 0 : 60000 }); }
   // 预热：取播放地址并让服务端提前下载解密（缓存在服务端），点播放时首帧几乎即到
@@ -1124,6 +1205,11 @@
     var el = $('#player'); el.hidden = false; el.className = 'feed';
     el.innerHTML = '<div class="pload"><i></i><span>正在加载</span></div>';
     var aborted = false, items = [], seen = {}, src = 'fy', ch = '16', next = 0, cell = '', sess = '', more = true, dry = 0, pending = null, bq = null, bi = 0, boff = 0, bsess = '';
+    // 复用首页已缓存的推荐列表作为首屏种子，省掉进入 /feed 后串行干等 /api/foryou 的 1.5~2s。
+    var seedHome = persist('home');
+    if (Array.isArray(seedHome) && seedHome.length) {
+      seedHome.forEach(function (s) { if (s && s.id && !seen[s.id]) { seen[s.id] = 1; items.push(s); } });
+    }
     function fetchMore() {
       if (pending) return pending;
       if (!more) return Promise.resolve();
@@ -1189,6 +1275,7 @@
         for (var k = 0; k < items.length && k < 5; k++) {
           var s = items[k], r;
           feedCtrl.prefetchAhead(k);
+          if (s.firstVid) playInfo(s.firstVid, LV.get('quality')).catch(function () {});
           try { r = await api('/api/detail', { query: { id: s.id, lite: '1' }, ttl: TTL }); } catch (er) { lastErr = er; continue; }
           if (aborted) return;
           if (r && r.detail && r.detail.episodes && r.detail.episodes.length) {
@@ -1233,7 +1320,8 @@
     var stage = $('.stage', el), v = null, dm = new LV.Danmaku($('.dml', el)), db = $('.db', el);
     var fdCover = $('.fd-cover', stage), fdBar = $('.fd-bar i', el);
     var S = { d: d, i: Math.max(0, Math.min(index, d.episodes.length - 1)), gears: [], quality: LV.get('quality'), activeQuality: LV.get('quality'), def: '', start: posMs / 1000, idle: 0, token: 0, tab: 'eps', cmN: 30, pre: null, browseDetail: d, browseSeasonID: d.id, seasonDetails: {}, seasonRequest: 0, browseLoading: false, recovery: { attempts: 0, timer: null, stable: null, stall: null },
-      feed: feed || null, feedIdx: feed ? feed.index : 0, feedWarms: Object.create(null), feedNavToken: 0, fav: !!d.favorite, slideTimer: null };
+      feed: feed || null, feedIdx: feed ? feed.index : 0, feedWarms: Object.create(null), feedNavToken: 0, fav: !!d.favorite, slideTimer: null,
+      feedHistoryEligible: !feed || index >= 1 || !!progressOf(d.id) };
     S.seasonDetails[d.id] = d;
     PL = S;
     $('[data-a=rate]', el).textContent = LV.get('rate') + 'x';
@@ -1318,8 +1406,15 @@
       });
     }
     function cssUrl(u) { return u ? "url('" + String(u).replace(/['\\\n\r]/g, '') + "')" : ''; }
+    function feedCanRecordHistory() {
+      if (!feed) return true;
+      // 刷剧模式：只看第 1 集（未进第 2 集）绝不入历史记录，避免刷剧把历史记录弄乱；已有历史或进入第 2 集才记录。
+      if (S.feedHistoryEligible) return true;
+      if (S.i >= 1 || !!progressOf(d.id)) { S.feedHistoryEligible = true; return true; }
+      return false;
+    }
     function persistSeriesProgress() {
-      if (!((LV.loggedIn || GUEST) && S.reportStarted && v && d.episodes[S.i])) return null;
+      if (!((LV.loggedIn || GUEST) && S.reportStarted && feedCanRecordHistory() && v && d.episodes[S.i])) return null;
       var saved = Object.assign({}, progressOf(d.id) || {}, { seriesId: d.id, title: d.title, cover: d.cover,
         vid: d.episodes[S.i].vid, episodeIndex: S.i, positionMs: Math.max(0, Math.round((v.currentTime || 0) * 1000)),
         episodeCount: d.episodes.length, time: Date.now() });
@@ -1434,17 +1529,28 @@
       d = detail; S.d = d; S.browseDetail = d; S.browseSeasonID = d.id;
       S.seasonDetails = {}; S.seasonDetails[d.id] = d; S.seasons = undefined; S.seasonsPending = null;
       S.gi = null; S.fav = fav; S.feedIdx = targetIdx; feed.index = targetIdx;
+      S.feedHistoryEligible = epIdx >= 1 || !!progressOf(d.id);
       trimFeedWarms(targetIdx);
       return load(epIdx, startSec, dir, { slideDir: dir, feedWarm: warm });
     }
     function feedStep(dir) { return feedSwitch(S.feedIdx + dir, dir); }
     function seasonsFor(id) {
-      if(Array.isArray(S.seasons)&&S.seasons.some(function(x){return x.id===id}))return Promise.resolve(S.seasons);
-      if(S.seasonsPending&&S.seasonsPending.id===id)return S.seasonsPending.promise;
-      var pending={id:id};S.seasonsPending=pending;
-      pending.promise=api('/api/seasons',{query:{id:id},ttl:TTL}).then(function(r){
-        var list=(r&&r.seasons)||[];if(PL===S){S.seasons=list;if(S.tab==='eps'&&el.classList.contains('dock-on'))drawDock()}return list;
-      }).finally(function(){if(S.seasonsPending===pending)S.seasonsPending=null});
+      if (Array.isArray(S.seasons) && S.seasons.some(function (x) { return x.id === id; })) return Promise.resolve(S.seasons);
+      var hit = seasonsCache.get(id);
+      if (hit && Date.now() - hit.at < 600e3) {
+        S.seasons = hit.list;
+        return Promise.resolve(hit.list);
+      }
+      if (S.seasonsPending && S.seasonsPending.id === id) return S.seasonsPending.promise;
+      var pending = { id: id }; S.seasonsPending = pending;
+      pending.promise = api('/api/seasons', { query: { id: id, quick: '1' }, ttl: TTL }).then(function (r) {
+        var list = (r && r.seasons) || [];
+        var entry = { at: Date.now(), list: list };
+        seasonsCache.set(id, entry);
+        list.forEach(function (x) { if (x && x.id) seasonsCache.set(x.id, entry); });
+        if (PL === S) { S.seasons = list; if (S.tab === 'eps' && el.classList.contains('dock-on')) drawDock(); }
+        return list;
+      }).finally(function () { if (S.seasonsPending === pending) S.seasonsPending = null; });
       return pending.promise;
     }
     function warmNextSeason() {
@@ -1520,15 +1626,35 @@
         var gi = S.gi == null ? Math.floor((sameSeason ? S.i : 0) / 100) : S.gi;
         if (gi >= groups.length) gi = 0; S.gi = gi;
         // 季标签只切换选集面板的数据；当前播放剧集与自动续播仍由 d 保持。
-        if (S.seasons === undefined) { S.seasons = null; seasonsFor(d.id).catch(function () { if(PL===S)S.seasons=[]; }); }
+        if (S.seasons === undefined) {
+          var hitSeas = seasonsCache.get(d.id);
+          if (hitSeas && Date.now() - hitSeas.at < 600e3) S.seasons = hitSeas.list;
+          else if (d.multiSeason) { S.seasons = null; seasonsFor(d.id).catch(function () { if (PL === S) { S.seasons = []; drawDock(); } }); }
+          else S.seasons = [];
+        }
+        var seasLoading = d.multiSeason && S.seasons === null;
         var seas = S.seasons && S.seasons.length > 1 ? S.seasons : null;
+        var seasBar = seas
+          ? '<div class="epseas">' + seas.map(function (x) { var cur = x.id === S.browseSeasonID, soon = !x.episodes; return '<button class="' + (cur ? 'on' : '') + (soon ? ' soon' : '') + '" data-season="' + x.id + '"' + (cur ? ' disabled' : '') + '>第 ' + x.number + ' 季' + (soon ? '<em>待上线</em>' : '') + '</button>'; }).join('') + '</div>'
+          : (seasLoading ? '<div class="epseas sk"><span class="skel"></span><span class="skel"></span><span class="skel"></span><span class="skel"></span></div>' : '');
+        var browseSeason = (S.seasons || []).filter(function (x) { return x.id === S.browseSeasonID; })[0];
         var currentEpisode = d.episodes[S.i], currentSeason = (S.seasons || []).filter(function (x) { return x.id === d.id; })[0];
+        var metaParts = [];
+        if (browseSeason) metaParts.push('第 ' + browseSeason.number + ' 季');
+        if (total) metaParts.push('全 ' + total + ' 集');
+        if (listDetail.plays) metaParts.push(playsShort(listDetail.plays) + '播放');
+        if (listDetail.tag) metaParts.push(listDetail.tag);
+        var detailCard = S.browseLoading
+          ? '<div class="epdetail sk"><div class="epd-cov skel"></div><div class="epd-body"><div class="skel t m"></div><div class="skel t s"></div><div class="skel t l"></div></div></div>'
+          : '<div class="epdetail"><div class="epd-cov poster">' + (listDetail.cover ? LV.img(listDetail.cover, listDetail.title, 200) : '') + '</div>' +
+            '<div class="epd-body"><div class="epd-title">' + esc(listDetail.title || '') + '</div>' +
+            (metaParts.length ? '<div class="epd-meta">' + esc(metaParts.join(' · ')) + '</div>' : '') +
+            (listDetail.intro ? '<div class="epd-intro">' + esc(listDetail.intro) + '</div>' : '') + '</div></div>';
         var status = !sameSeason && currentEpisode ? '<div class="epstatus">当前仍在播放：' + (currentSeason ? '第 ' + currentSeason.number + ' 季 · ' : '') + '第 ' + currentEpisode.index + ' 集</div>' : '';
         var episodeList = S.browseLoading ? epSk(12) : total && groups.length
           ? listDetail.episodes.slice(groups[gi][0] - 1, groups[gi][1]).map(function (e, k) { var i = groups[gi][0] - 1 + k; return epNum(e, i, sameSeason && i === S.i, sameSeason && i < S.i, sameSeason); }).join('')
           : '<div class="epempty">这一季暂时没有可播放的剧集</div>';
-        db.innerHTML = '<div class="eptop">' +
-          (seas ? '<div class="epseas">' + seas.map(function (x) { var cur = x.id === S.browseSeasonID, soon = !x.episodes; return '<button class="' + (cur ? 'on' : '') + (soon ? ' soon' : '') + '" data-season="' + x.id + '"' + (cur ? ' disabled' : '') + '>第 ' + x.number + ' 季' + (soon ? '<em>待上线</em>' : '') + '</button>'; }).join('') + '</div>' : '') +
+        db.innerHTML = '<div class="eptop">' + detailCard + seasBar +
           status + (groups.length > 1 ? '<div class="rngs">' + groups.map(function (g, k) { var playing = sameSeason && S.i >= g[0] - 1 && S.i <= g[1] - 1; return '<button class="' + (k === gi ? 'on' : '') + (playing ? ' has' : '') + '" data-gi="' + k + '">' + g[0] + '–' + g[1] + '</button>'; }).join('') + '</div>' : '') + '</div>' +
           '<div class="deps' + (S.browseLoading ? ' loading' : '') + '">' + episodeList + '</div>';
         var c = $('.epn.cur', db), top = $('.eptop', db); if (c) db.scrollTop = Math.max(0, c.offsetTop - (top ? top.offsetHeight : 0) - (db.clientHeight - (top ? top.offsetHeight : 0)) / 2 + c.offsetHeight / 2);
@@ -1626,7 +1752,13 @@
         }
         var p = v.play(); if (p && p.catch) p.catch(function (er) { if (tk !== S.token) return; if (er && er.name === 'NotAllowedError') { presentVideo(nv, tk); ppIcon('play'); $('.pload', el).classList.add('hide'); el.classList.add('ready', 'paused'); } else if (!er || er.name !== 'AbortError') autoRecover(tk); });
         // 真正开始播放后才上报进度/历史、拉取弹幕评论并预热下一集（见 on.playing），避免当前集首帧未出时其它请求抢占连接和带宽
-        var vv = v; S.report = function () { S.report = null; if (tk === S.token) { S.reportStarted = true; rep.start(d.id, ep.vid, i, function () { return vv.currentTime; }, {title:d.title,cover:d.cover,episodeCount:d.episodes.length}); } };
+        // 刷剧模式下仅短暂看第 1 集不入历史：直到进入第 2 集或单集观看达到阈值才开始上报。
+        if (feed && i >= 1) S.feedHistoryEligible = true;
+        var vv = v; S.report = function () {
+          if (tk !== S.token || !feedCanRecordHistory()) return;
+          S.report = null; S.reportStarted = true;
+          rep.start(d.id, ep.vid, i, function () { return vv.currentTime; }, {title:d.title,cover:d.cover,episodeCount:d.episodes.length});
+        };
         S.loadComments = function () { S.loadComments = null; dm.fetch(d.id, ep.vid, ep.duration).then(function () { S.cmLoading = false; if (tk === S.token) { dm.seek(v.currentTime || 0); if (S.tab === 'cm' && el.classList.contains('dock-on')) drawDock(); } }); };
         if (S.tab === 'cm' && el.classList.contains('dock-on')) S.loadComments();
       } catch (e) { if (tk === S.token) autoRecover(tk); }
@@ -1744,6 +1876,7 @@
       if (changedSeason) {
         dropPre();dropNextSeason();
         d = target; S.d = d; S.browseSeasonID = d.id; S.gi = null;
+        $('.amb i', el).style.backgroundImage = cssUrl(LV.sized(d.cover, 200));
       }
       return load(i, 0, changedSeason ? 0 : (i > S.i ? 1 : -1));
     }
@@ -1754,7 +1887,7 @@
       S.browseSeasonID = id; S.gi = null;
       if (cached) { S.browseDetail = cached; S.browseLoading = false; drawDock(); return; }
       S.browseLoading = true; drawDock();
-      api('/api/detail', { query: { id: id } }).then(function (r) {
+      api('/api/detail', { query: { id: id, lite: '1' }, ttl: TTL }).then(function (r) {
         if (PL !== S || request !== S.seasonRequest || !r.detail) return;
         S.seasonDetails[id] = r.detail; S.browseDetail = r.detail; S.browseLoading = false; drawDock();
       }, function (er) {
@@ -1820,6 +1953,7 @@
         if (fdBar) fdBar.style.width = pc + '%';
         if (v.buffered.length) { var bf = 0; for (var k = 0; k < v.buffered.length; k++) if (v.buffered.start(k) <= t + 0.5) bf = Math.max(bf, v.buffered.end(k)); buf.style.width = bf / du * 100 + '%'; }
         timeEl.textContent = LV.time(t) + ' / ' + LV.time(du);
+        if (feed && S.report && !S.reportStarted && feedCanRecordHistory()) S.report();
       }
       dm.tick(t); S.raf = requestAnimationFrame(frame);
     }

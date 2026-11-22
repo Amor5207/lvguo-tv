@@ -1,6 +1,6 @@
-// Package hg 是红果接口的 Go 实现：设备注册、内容接口、账号接口、扫码登录、播放地址。
+// Package lvguo 是红果接口的 Go 实现：设备注册、内容接口、账号接口、扫码登录、播放地址。
 // 协议细节移植自 Android 端 net/ 目录，行为保持一致。
-package hg
+package lvguo
 
 import (
 	"bytes"

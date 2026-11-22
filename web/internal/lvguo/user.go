@@ -1,6 +1,8 @@
-package hg
+package lvguo
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/url"
 	"sort"
@@ -31,6 +33,22 @@ func (u *User) Cookie() string {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return cookieString(u.Jar)
+}
+
+// CacheKey separates playback models per login session without exposing the
+// session cookie in cache keys or logs.
+func (u *User) CacheKey() string {
+	u.mu.Lock()
+	sid := u.Jar["sessionid_ss"]
+	if sid == "" {
+		sid = u.Jar["sessionid"]
+	}
+	u.mu.Unlock()
+	if sid == "" {
+		return "anon"
+	}
+	h := sha256.Sum256([]byte(sid))
+	return "u" + hex.EncodeToString(h[:8])
 }
 
 func cookieString(jar map[string]string) string {

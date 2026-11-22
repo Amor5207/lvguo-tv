@@ -1,4 +1,4 @@
-package hg
+package lvguo
 
 import (
 	"bytes"
@@ -20,7 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"lvguo/internal/hgplay"
+	"lvguo/internal/lvguoplay"
+	"lvguo/internal/lvguosigner"
 	"lvguo/internal/sign"
 )
 
@@ -672,7 +673,7 @@ func (c *Content) Detail(cookie, id string) (*Detail, error) {
 	// 响应里没有 is_multi_season / season_index：related_album_id 存在即为同系列多季。
 	d.AlbumID = str(vd["related_album_id"])
 	d.MultiSeason = d.AlbumID != ""
-	d.SeasonIndex = seasonNumberFromTitle(d.Title)
+	d.SeasonIndex = explicitSeasonNumber(d.Title)
 	for _, ce := range arr(vd["celebrities"]) {
 		if n := str(obj(ce)["nickname"]); n != "" && len(d.Actors) < 8 {
 			d.Actors = append(d.Actors, n)
@@ -702,6 +703,98 @@ type Season struct {
 	Number   int    `json:"number"`
 	Episodes int    `json:"episodes"`
 	Current  bool   `json:"current,omitempty"`
+}
+
+// SeasonsQuick 快速返回该剧所属系列的全部季（仅 1 次 get_video_list，约 0.2s）。
+// duration>0 为已上线季，0 时长且标题含“季”为已公布待上线季；顺序对不上时自动退回 Seasons。
+func (c *Content) SeasonsQuick(cookie, seriesID string) ([]Season, error) {
+	if !digits.MatchString(seriesID) {
+		return nil, errors.New("剧集编号无效")
+	}
+	cur, err := c.Detail(cookie, seriesID)
+	if err != nil {
+		return nil, err
+	}
+	if !cur.MultiSeason || cur.AlbumID == "" {
+		return nil, nil
+	}
+	if v, ok := c.get("seasons:" + cur.AlbumID); ok {
+		return markCurrentSeason(v.([]Season), seriesID), nil
+	}
+	if v, ok := c.get("seasons_quick:" + cur.AlbumID); ok {
+		return markCurrentSeason(v.([]Season), seriesID), nil
+	}
+	m, err := c.C.CallRetry(cookie, "/api/novel/origin/album/get_video_list/v1/", nil,
+		sign.Params{{K: "album_id", V: cur.AlbumID}, {K: "count", V: "100"}, {K: "offset", V: "0"}})
+	if err != nil || int(num(m["code"])) != 0 {
+		return c.Seasons(cookie, seriesID)
+	}
+	videos := arr(obj(m["data"])["video_data_list"])
+	if len(videos) == 0 {
+		return c.Seasons(cookie, seriesID)
+	}
+	type row struct {
+		id, title, cover string
+		real             bool
+	}
+	var order []string
+	byTitle := map[string]*row{}
+	for _, raw := range videos {
+		v := obj(raw)
+		common := obj(v["common"])
+		if v == nil || common == nil {
+			continue
+		}
+		id := str(v["video_id"])
+		title := strings.TrimSpace(str(common["title"]))
+		if !digits.MatchString(id) || title == "" {
+			continue
+		}
+		real := num(common["duration"]) > 0
+		key := normalizeSeasonTitle(title)
+		if old, exists := byTitle[key]; !exists {
+			byTitle[key] = &row{id: id, title: title, cover: str(common["cover"]), real: real}
+			order = append(order, key)
+		} else if real && !old.real {
+			old.id, old.title, old.cover, old.real = id, title, str(common["cover"]), true
+		}
+	}
+	expected := cur.SeasonIndex
+	curPos := -1
+	for i, t := range order {
+		if byTitle[t].id == seriesID {
+			curPos = i
+			break
+		}
+	}
+	if expected > 0 && (curPos < 0 || curPos+1 != expected) {
+		return c.Seasons(cookie, seriesID)
+	}
+	var out []Season
+	for _, t := range order {
+		r := byTitle[t]
+		if !r.real && !strings.Contains(r.title, "季") {
+			continue
+		}
+		n := explicitSeasonNumber(r.title)
+		if r.id == seriesID && expected > 0 {
+			n = expected
+		}
+		eps := 0
+		if r.id == seriesID && len(cur.Episodes) > 0 {
+			eps = len(cur.Episodes)
+		} else if r.real {
+			eps = 1
+		}
+		out = append(out, Season{ID: r.id, Title: r.title, Cover: r.cover, Number: n, Episodes: eps})
+	}
+	assignSeasonNumbers(out)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Number < out[j].Number })
+	if len(out) <= 1 {
+		return nil, nil
+	}
+	c.put("seasons_quick:"+cur.AlbumID, out, 10*time.Minute)
+	return markCurrentSeason(out, seriesID), nil
 }
 
 // Seasons 返回该剧所属系列的全部季（按季号排序）；非多季返回空。
@@ -736,34 +829,42 @@ func (c *Content) Seasons(cookie, seriesID string) ([]Season, error) {
 	if !seen[seriesID] {
 		ids = append(ids, seriesID)
 	}
-	// 各季详情并行取（最多 6 路）：季数多的剧串行要十几秒，季列表迟迟出不来
+	// 合集详情支持一次传多部（≤21）：逐季发请求在季数多时会拖到十几秒。
 	details := make([]*Detail, len(ids))
-	var wg sync.WaitGroup
-	gate := make(chan struct{}, 6)
-	for i, id := range ids {
-		wg.Add(1)
-		go func(i int, id string) {
-			defer wg.Done()
-			gate <- struct{}{}
-			defer func() { <-gate }()
-			if d, err := c.Detail(cookie, id); err == nil {
+	for start := 0; start < len(ids); start += 21 {
+		end := start + 21
+		if end > len(ids) {
+			end = len(ids)
+		}
+		m, err := c.C.CallRetry(cookie, PathAlbum, albumBody(seriesID, ids[start:end]), nil)
+		data := obj(obj(m["data"])["video_detail_data"])
+		if err == nil && int(num(m["code"])) == 0 && data != nil {
+			for i := start; i < end; i++ {
+				vd := obj(obj(data[ids[i]])["video_data"])
+				if vd == nil {
+					continue
+				}
+				details[i] = &Detail{ID: ids[i], Title: str(vd["series_title"]), Cover: str(vd["series_cover"]),
+					Count: int(num(vd["episode_cnt"])), AlbumID: str(vd["related_album_id"])}
+			}
+			continue
+		}
+		for i := start; i < end; i++ {
+			if d, err := c.Detail(cookie, ids[i]); err == nil {
 				details[i] = d
 			}
-		}(i, id)
+		}
 	}
-	wg.Wait()
 	var out []Season
 	for order, id := range ids {
 		d := details[order]
 		if d == nil || d.AlbumID == "" || d.AlbumID != cur.AlbumID {
 			continue
 		}
-		n := seasonNumberFromTitle(d.Title)
-		if n <= 0 {
-			n = order + 1 // 标题没写季号时按合集列表顺序
-		}
+		n := explicitSeasonNumber(d.Title)
 		out = append(out, Season{ID: id, Title: d.Title, Cover: d.Cover, Number: n, Episodes: d.Count})
 	}
+	assignSeasonNumbers(out)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Number < out[j].Number })
 	if len(out) <= 1 {
 		return nil, nil
@@ -784,7 +885,7 @@ func markCurrentSeason(seasons []Season, seriesID string) []Season {
 // ------------------------------------------------------------ 播放
 
 // Play 取单集各清晰度的播放地址。
-// 取流走 internal/hgplay：纯 Go 签名（搬运自 aston314/hongguo-tv，含 Gorgon/Helios/Medusa），
+// 取流走 internal/lvguoplay：纯 Go 签名（搬运自 aston314/hongguo-tv，含 Gorgon/Helios/Medusa），
 // 注册匿名设备请求 video_model，已实测可取到可播 CDN 直链，不需要 native/模拟器。
 // 每次调用使用独立匿名设备；失败重试一次（换新设备）。
 // Share anonymous playback models between source discovery and media fetching.
@@ -798,15 +899,24 @@ func (c *Content) Play(a *Account, vid string) ([]Gear, error) {
 	if !digits.MatchString(vid) {
 		return nil, errors.New("视频编号无效")
 	}
-	return c.cachedPlay(vid, func() ([]Gear, error) { return c.loadPlay(a, vid) })
+	identity := "anon"
+	if a != nil && a.U != nil {
+		identity = a.U.CacheKey()
+	}
+	key := "play|" + identity + "|" + vid
+	return c.cachedPlay(key, func() ([]Gear, error) { return c.loadPlay(a, vid) })
 }
 func (c *Content) ForgetPlay(vid string) {
+	suffix := "|" + vid
 	c.mu.Lock()
-	delete(c.cache, "play|"+vid)
+	for key := range c.cache {
+		if strings.HasPrefix(key, "play|") && strings.HasSuffix(key, suffix) {
+			delete(c.cache, key)
+		}
+	}
 	c.mu.Unlock()
 }
-func (c *Content) cachedPlay(vid string, load func() ([]Gear, error)) ([]Gear, error) {
-	key := "play|" + vid
+func (c *Content) cachedPlay(key string, load func() ([]Gear, error)) ([]Gear, error) {
 	c.mu.Lock()
 	if hit, ok := c.cache[key]; ok && time.Since(hit.at) < hit.ttl {
 		c.mu.Unlock()
@@ -815,13 +925,13 @@ func (c *Content) cachedPlay(vid string, load func() ([]Gear, error)) ([]Gear, e
 	if c.playLoads == nil {
 		c.playLoads = make(map[string]*playModelLoad)
 	}
-	if pending := c.playLoads[vid]; pending != nil {
+	if pending := c.playLoads[key]; pending != nil {
 		c.mu.Unlock()
 		<-pending.done
 		return pending.gears, pending.err
 	}
 	pending := &playModelLoad{done: make(chan struct{})}
-	c.playLoads[vid] = pending
+	c.playLoads[key] = pending
 	c.mu.Unlock()
 	gears, err := load()
 	c.mu.Lock()
@@ -830,10 +940,79 @@ func (c *Content) cachedPlay(vid string, load func() ([]Gear, error)) ([]Gear, e
 		c.cache[key] = cacheItem{at: time.Now(), ttl: 60 * time.Second, v: gears}
 	}
 	pending.gears, pending.err = gears, err
-	delete(c.playLoads, vid)
+	delete(c.playLoads, key)
 	close(pending.done)
 	c.mu.Unlock()
 	return gears, err
+}
+
+// lastWorkingPlayRoute remembers the fastest working pure-Go playback route
+// so subsequent video requests skip dead upstream routes immediately.
+var playRoutePref struct {
+	mu    sync.Mutex
+	route string
+	at    time.Time
+}
+
+func preferredPlayRoutes(hasDynamic bool, loggedIn bool) []string {
+	// 严格按远端 playback-config.json 配置的 routes 顺序调度（默认 dynamic → videotab → legacy），
+	// account 仅作为最后保底。
+	var base []string
+	for _, r := range lvguoplay.PlaybackRoutes() {
+		if r == "single" {
+			continue
+		}
+		if r == "dynamic" && !hasDynamic {
+			continue
+		}
+		base = append(base, r)
+	}
+	if len(base) == 0 {
+		if hasDynamic {
+			base = append(base, "dynamic")
+		}
+		base = append(base, "videotab", "legacy")
+	}
+
+	playRoutePref.mu.Lock()
+	fav, at := playRoutePref.route, playRoutePref.at
+	playRoutePref.mu.Unlock()
+
+	var routes []string
+	if fav != "" && fav != "account" && time.Since(at) < 10*time.Minute {
+		for _, r := range base {
+			if r == fav {
+				routes = append(routes, fav)
+				break
+			}
+		}
+	}
+	for _, r := range base {
+		dup := false
+		for _, existing := range routes {
+			if existing == r {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			routes = append(routes, r)
+		}
+	}
+	if loggedIn {
+		routes = append(routes, "account")
+	}
+	return routes
+}
+
+func rememberPlayRoute(route string) {
+	if route == "" || route == "account" {
+		return
+	}
+	playRoutePref.mu.Lock()
+	playRoutePref.route = route
+	playRoutePref.at = time.Now()
+	playRoutePref.mu.Unlock()
 }
 
 func (c *Content) loadPlay(a *Account, vid string) ([]Gear, error) {
@@ -841,42 +1020,66 @@ func (c *Content) loadPlay(a *Account, vid string) ([]Gear, error) {
 		return nil, errors.New("视频编号无效")
 	}
 	var last error
-	routes := append([]string{"videotab"}, hgplay.PlaybackRoutes()...)
+	var ds *DynamicSettings
+	if a != nil {
+		ds = a.DynamicSettings()
+	} else {
+		ds = settingsSnapshot()
+	}
+	drScene := ds.DrScene()
+	loggedIn := a != nil && a.U != nil && a.U.LoggedIn() && lvguosigner.Default().Enabled()
+	routes := preferredPlayRoutes(drScene != "", loggedIn)
 	for _, route := range routes {
-		attempts, timeout := 1, 12*time.Second
-		if route == "single" {
-			attempts, timeout = 2, 30*time.Second
-		}
-		for attempt := 0; attempt < attempts; attempt++ {
-			ctx, cancel := context.WithTimeout(context.Background(), timeout)
-			var envelope map[string]any
-			var err error
-			switch route {
-			case "legacy":
-				envelope, err = hgplay.PlayLegacy(ctx, vid)
-			case "videotab":
-				envelope, err = hgplay.PlayVideoTab(ctx, vid)
-			default:
-				envelope, err = hgplay.Play(ctx, vid)
+		const timeout = 10 * time.Second
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		var envelope map[string]any
+		var err error
+		switch route {
+		case "dynamic":
+			envelope, err = lvguoplay.PlayMultiModel(ctx, vid, drScene)
+		case "account":
+			envelope, err = a.PlaybackV2(ctx, vid, drScene)
+			usable := false
+			if err == nil && playbackCode(envelope) == 0 {
+				if g, gErr := parsePlayGears(envelope, vid); gErr == nil && hasCompatiblePlayGear(g) {
+					usable = true
+				}
 			}
+			if !usable && ctx.Err() == nil {
+				alternate := ""
+				if drScene == "" {
+					alternate = "default"
+				}
+				if retry, retryErr := a.PlaybackV2(ctx, vid, alternate); retryErr == nil && playbackCode(retry) == 0 {
+					envelope, err = retry, nil
+				}
+			}
+		case "legacy":
+			envelope, err = lvguoplay.PlayLegacy(ctx, vid)
+		case "videotab":
+			envelope, err = lvguoplay.PlayVideoTab(ctx, vid)
+		default:
 			cancel()
-			if err != nil {
-				last = err
-				continue
-			}
-			if code := playbackCode(envelope); code != 0 {
-				last = fmt.Errorf("取播放信息失败（%d）", code)
-				continue
-			}
-			gears, err := parsePlayGears(envelope, vid)
-			if err == nil && hasCompatiblePlayGear(gears) {
-				return gears, nil
-			}
-			if err != nil {
-				last = err
-			} else {
-				last = errors.New("没有可用播放源")
-			}
+			continue
+		}
+		cancel()
+		if err != nil {
+			last = err
+			continue
+		}
+		if code := playbackCode(envelope); code != 0 {
+			last = fmt.Errorf("取播放信息失败（%d）", code)
+			continue
+		}
+		gears, err := parsePlayGears(envelope, vid)
+		if err == nil && hasCompatiblePlayGear(gears) {
+			rememberPlayRoute(route)
+			return gears, nil
+		}
+		if err != nil {
+			last = err
+		} else {
+			last = errors.New("没有可用播放源")
 		}
 	}
 
@@ -898,6 +1101,9 @@ func playbackCode(response map[string]any) int {
 
 func parsePlayGears(response map[string]any, vid string) ([]Gear, error) {
 	data := obj(response["data"])
+	if nested := objectOrJSON(data["video_model_data"]); nested != nil {
+		data = nested
+	}
 	node := obj(data[vid])
 	model := playModel(node["video_model"])
 	if len(model) == 0 && node["video_list"] != nil {
@@ -916,41 +1122,47 @@ func parsePlayGears(response map[string]any, vid string) ([]Gear, error) {
 		return nil, errors.New("播放节点为空")
 	}
 
-	var seed []byte
-	if fallback := extractPlayFallbackAPI(model["fallback_api"]); fallback != "" {
-		inner, keySeed, err := fetchCompatiblePlayFallback(fallback)
+	direct := parsePlayGearRows(model, nil)
+	var fallbackGears []Gear
+	fallbackAPI := extractPlayFallbackAPI(model["fallback_api"])
+	if fallbackAPI != "" {
+		inner, keySeed, err := fetchCompatiblePlayFallback(fallbackAPI)
 		if err != nil {
-			if !hasPlayRows(model["video_list"]) {
+			if len(direct) == 0 {
 				return nil, err
 			}
 		} else {
-			merged := make(map[string]any, len(model)+len(inner))
-			for key, value := range model {
-				merged[key] = value
-			}
-			for key, value := range inner {
-				merged[key] = value
-			}
-			model, seed = merged, keySeed
+			fallbackGears = parsePlayGearRows(inner, keySeed)
 		}
 	}
+	out := mergePlayGears(direct, fallbackGears)
+	if hasCompatiblePlayGear(out) {
+		kept := out[:0]
+		for _, gear := range out {
+			if !isByteVC2Codec(gear.Codec) {
+				kept = append(kept, gear)
+			}
+		}
+		out = kept
+	}
+	if len(out) == 0 {
+		if fallbackAPI != "" {
+			return nil, errors.New("播放模型要求 fallback_api 取源")
+		}
+		return nil, errors.New("播放模型没有直连视频列表")
+	}
+	return out, nil
+}
 
-	var rows []any
-	switch list := model["video_list"].(type) {
-	case []any:
-		rows = list
-	case map[string]any:
-		for _, row := range list {
-			rows = append(rows, row)
-		}
-	}
+func parsePlayGearRows(model map[string]any, seed []byte) []Gear {
+	rows := playRows(model["video_list"])
 	var out []Gear
 	for _, value := range rows {
-		vo := obj(value)
+		vo := objectOrJSON(value)
 		if vo == nil {
 			continue
 		}
-		meta, enc := obj(vo["video_meta"]), obj(vo["encrypt_info"])
+		meta, enc := objectOrJSON(vo["video_meta"]), objectOrJSON(vo["encrypt_info"])
 		if len(meta) == 0 {
 			meta = vo
 		}
@@ -997,31 +1209,115 @@ func parsePlayGears(response map[string]any, vid string) ([]Gear, error) {
 		if spadeA == "" {
 			spadeA = str(vo["spade_a"])
 		}
-		encrypted := enc["encrypt"] == true || vo["encrypt"] == true
+		encrypted := boolValue(enc["encrypt"]) || boolValue(vo["encrypt"])
 		gear := Gear{Definition: definition, Codec: codec, Width: width, Height: height, Size: int64(num(meta["size"])),
 			MainURL: mainURL, BackupURL: backupURL, BackupURLs: backups, Encrypted: encrypted, SpadeA: spadeA}
 		if gear.MainURL != "" {
 			out = append(out, gear)
 		}
 	}
-	if len(out) == 0 {
-		if str(model["fallback_api"]) != "" {
-			return nil, errors.New("播放模型要求 fallback_api 取源")
+	return out
+}
+
+// mergePlayGears keeps one URL per definition and prefers a TV-decodable codec.
+// Earlier lists win on equal codecs; later lists can replace only with a better codec.
+func mergePlayGears(lists ...[]Gear) []Gear {
+	index := map[string]int{}
+	var out []Gear
+	for _, gears := range lists {
+		for _, gear := range gears {
+			key := gear.Definition
+			if key == "" {
+				key = fmt.Sprintf("%dx%d", gear.Width, gear.Height)
+			}
+			if key == "" || key == "0x0" {
+				key = gear.MainURL
+			}
+			at, ok := index[key]
+			if !ok {
+				index[key] = len(out)
+				out = append(out, gear)
+				continue
+			}
+			if codecRank(gear.Codec) < codecRank(out[at].Codec) {
+				out[at] = gear
+			}
 		}
-		return nil, errors.New("播放模型没有直连视频列表")
 	}
-	return out, nil
+	return out
+}
+
+// codecRank orders codecs for TV playback: H.264 is the safest, H.265 is
+// widely supported, and ByteVC needs a vendor decoder that TVs usually lack.
+func codecRank(codec string) int {
+	switch {
+	case isH264Codec(codec):
+		return 0
+	case isH265Codec(codec):
+		return 1
+	case isByteVC2Codec(codec):
+		return 3
+	default:
+		return 2
+	}
+}
+
+func isH264Codec(codec string) bool {
+	c := strings.ToLower(strings.TrimSpace(codec))
+	return c == "h264" || c == "avc" || c == "avc1" || strings.Contains(c, "h.264")
+}
+
+func isH265Codec(codec string) bool {
+	c := strings.ToLower(strings.TrimSpace(codec))
+	return c == "h265" || c == "hevc" || strings.Contains(c, "h.265")
+}
+
+func objectOrJSON(value any) map[string]any {
+	if m := obj(value); m != nil {
+		return m
+	}
+	if raw := str(value); raw != "" {
+		var m map[string]any
+		if json.Unmarshal([]byte(raw), &m) == nil {
+			return m
+		}
+	}
+	return nil
+}
+
+func playRows(value any) []any {
+	switch list := value.(type) {
+	case []any:
+		return list
+	case map[string]any:
+		rows := make([]any, 0, len(list))
+		for _, row := range list {
+			rows = append(rows, row)
+		}
+		return rows
+	case string:
+		var decoded any
+		if json.Unmarshal([]byte(list), &decoded) == nil {
+			return playRows(decoded)
+		}
+	}
+	return nil
+}
+
+func boolValue(value any) bool {
+	switch v := value.(type) {
+	case bool:
+		return v
+	case string:
+		b, err := strconv.ParseBool(strings.TrimSpace(v))
+		return err == nil && b
+	default:
+		return num(v) != 0
+	}
 }
 
 func hasPlayRows(value any) bool {
-	switch rows := value.(type) {
-	case []any:
-		return len(rows) > 0
-	case map[string]any:
-		return len(rows) > 0
-	default:
-		return false
-	}
+	return len(playRows(value)) > 0
 }
 
 // isByteVC2Codec 判断厂商专有码流（ByteVC1/ByteVC2/VVC）：电视的硬件 HEVC 解码器放不了。
@@ -1040,21 +1336,12 @@ func hasCompatiblePlayGear(gears []Gear) bool {
 }
 
 func hasByteVC2Rows(value any) bool {
-	var rows []any
-	switch list := value.(type) {
-	case []any:
-		rows = list
-	case map[string]any:
-		for _, r := range list {
-			rows = append(rows, r)
-		}
-	}
-	for _, item := range rows {
-		vo := obj(item)
+	for _, item := range playRows(value) {
+		vo := objectOrJSON(item)
 		if vo == nil {
 			continue
 		}
-		meta := obj(vo["video_meta"])
+		meta := objectOrJSON(vo["video_meta"])
 		codec := str(meta["codec_type"])
 		if codec == "" {
 			codec = str(vo["codec_type"])
@@ -1067,24 +1354,16 @@ func hasByteVC2Rows(value any) bool {
 }
 
 func onlyByteVC2Rows(value any) bool {
-	var rows []any
-	switch list := value.(type) {
-	case []any:
-		rows = list
-	case map[string]any:
-		for _, r := range list {
-			rows = append(rows, r)
-		}
-	}
+	rows := playRows(value)
 	if len(rows) == 0 {
 		return false
 	}
 	for _, item := range rows {
-		vo := obj(item)
+		vo := objectOrJSON(item)
 		if vo == nil {
 			continue
 		}
-		meta := obj(vo["video_meta"])
+		meta := objectOrJSON(vo["video_meta"])
 		codec := str(meta["codec_type"])
 		if codec == "" {
 			codec = str(vo["codec_type"])
@@ -1331,26 +1610,50 @@ func playModel(value any) map[string]any {
 	return nil
 }
 
-// PickGear 按偏好清晰度挑档；没有则取不超过上限的最高档。
+// PickGear 按偏好清晰度挑档；优先 H.264，其次 H.265，最后才是不超过上限的最高档。
 func PickGear(gears []Gear, prefer string, limit int) *Gear {
 	if limit <= 0 {
 		limit = 1080
 	}
-	var best *Gear
+	var exact, h264, best *Gear
 	for i := range gears {
 		g := &gears[i]
-		ss := g.ShortSide()
-		if ss <= 0 || ss > limit || strings.Contains(strings.ToLower(g.Codec), "bvc2") || strings.Contains(strings.ToLower(g.Codec), "bytevc2") {
+		if isByteVC2Codec(g.Codec) {
 			continue
 		}
+		ss := g.ShortSide()
 		if prefer != "" && g.Definition == prefer {
-			return g
+			if exact == nil || codecRank(g.Codec) < codecRank(exact.Codec) {
+				exact = g
+			}
 		}
-		if best == nil || ss > best.ShortSide() {
+		if ss <= 0 || ss > limit {
+			continue
+		}
+		if isH264Codec(g.Codec) && betterGear(g, h264) {
+			h264 = g
+		}
+		if betterGear(g, best) {
 			best = g
 		}
 	}
+	if exact != nil {
+		return exact
+	}
+	if h264 != nil {
+		return h264
+	}
 	return best
+}
+
+func betterGear(candidate, current *Gear) bool {
+	if current == nil {
+		return true
+	}
+	if candidate.ShortSide() != current.ShortSide() {
+		return candidate.ShortSide() > current.ShortSide()
+	}
+	return codecRank(candidate.Codec) < codecRank(current.Codec)
 }
 
 // ------------------------------------------------------------ 评论（弹幕来源）
@@ -1575,18 +1878,30 @@ func (c *Content) Suggest(a *Account, query string) []string {
 	return out
 }
 
-// seasonNumberFromTitle 从标题里解析「第N季」的季号；没有季号的（通常是第一季）返回 1。
-func seasonNumberFromTitle(title string) int {
+// normalizeSeasonTitle 将常见康熙部首兼容字符归一化，避免「第⼀季」与「第一季」被当成不同标题或无法识别季号。
+func normalizeSeasonTitle(s string) string {
+	r := strings.NewReplacer(
+		"⼀", "一", "⼆", "二", "⼋", "八", "⼗", "十",
+		"⻣", "骨", "⼑", "刀", "⼈", "人", "⼤", "大", "⼩", "小", "⼭", "山", "⻛", "风", "⻜", "飞",
+	)
+	return r.Replace(strings.TrimSpace(s))
+}
+
+// explicitSeasonNumber 从标题里解析显式「第N季/部」的季号；标题不含季号时返回 0。
+func explicitSeasonNumber(title string) int {
+	title = normalizeSeasonTitle(title)
 	i := strings.Index(title, "第")
 	if i < 0 {
-		return 1
+		return 0
 	}
 	rest := []rune(title[i+len("第"):])
-	cn := map[rune]int{'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
+	cn := map[rune]int{'一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
 	n := 0
-	for _, r := range rest {
+	end := 0
+	for idx, r := range rest {
 		if r >= '0' && r <= '9' {
 			n = n*10 + int(r-'0')
+			end = idx + 1
 		} else if v, ok := cn[r]; ok {
 			if r == '十' {
 				if n == 0 {
@@ -1597,12 +1912,54 @@ func seasonNumberFromTitle(title string) int {
 			} else {
 				n += v
 			}
+			end = idx + 1
 		} else {
 			break
 		}
 	}
-	if n <= 0 {
-		return 1
+	if n <= 0 || end >= len(rest) || (rest[end] != '季' && rest[end] != '部') {
+		return 0
 	}
 	return n
+}
+
+// assignSeasonNumbers 为合集内各季分配唯一季号：优先保留标题显式季号，无季号或冲突的续作按合集顺序顺延，避免出现两个「第 1 季」。
+func assignSeasonNumbers(out []Season) {
+	used := map[int]bool{}
+	fixed := make([]bool, len(out))
+	maxN := 0
+	for i := range out {
+		if out[i].Number > 0 && !used[out[i].Number] {
+			used[out[i].Number] = true
+			fixed[i] = true
+			if out[i].Number > maxN {
+				maxN = out[i].Number
+			}
+		}
+	}
+	for i := range out {
+		if fixed[i] {
+			continue
+		}
+		cand := i + 1
+		if cand <= 0 || used[cand] {
+			cand = maxN + 1
+		}
+		for used[cand] {
+			cand++
+		}
+		out[i].Number = cand
+		used[cand] = true
+		if cand > maxN {
+			maxN = cand
+		}
+	}
+}
+
+// seasonNumberFromTitle 从标题里解析「第N季」的季号；没有季号的返回 1。
+func seasonNumberFromTitle(title string) int {
+	if n := explicitSeasonNumber(title); n > 0 {
+		return n
+	}
+	return 1
 }

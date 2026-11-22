@@ -38,9 +38,11 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main
 
 ```
 cmd/lvguo/        入口与服务启动
-internal/sign/    请求签名（与 Android 端 Signer.java 逐字节对拍的测试）
-internal/hg/      红果接口：设备注册、内容、账号、扫码登录
-internal/cenc/    spade 密钥还原与 CENC MP4 解密
+internal/sign/        请求签名（与 Android 端 Signer.java 逐字节对拍的测试）
+internal/lvguo/       绿果播放：设备注册、内容、账号、动态配置、签名取流
+internal/lvguoplay/   匿名设备注册与官方通道签名
+internal/lvguosigner/ 原生 libmetasec 签名器
+internal/cenc/        spade 密钥还原与 CENC MP4 解密
 internal/server/  HTTP 服务：会话、接口、视频流、页面切换
 ui/               PC / 手机 / 共享前端
 ```

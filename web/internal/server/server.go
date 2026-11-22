@@ -25,8 +25,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"lvguo/internal/hg"
-	"lvguo/internal/hgplay"
+	"lvguo/internal/lvguo"
+	"lvguo/internal/lvguoplay"
 	"lvguo/internal/media"
 )
 
@@ -41,10 +41,10 @@ type Config struct {
 
 type sess struct {
 	id         string
-	acct       *hg.Account
-	qr         *hg.QR
-	ahead      *fyAhead           // 后台预取的下一批推荐
-	phone      *hgplay.PhoneLogin // 手机号登录进行中的会话（发码 → 登录 → 二次验证）
+	acct       *lvguo.Account
+	qr         *lvguo.QR
+	ahead      *fyAhead              // 后台预取的下一批推荐
+	phone      *lvguoplay.PhoneLogin // 手机号登录进行中的会话（发码 → 登录 → 二次验证）
 	forYou     struct{ cell, session string }
 	lastBeat   time.Time
 	lastActive time.Time
@@ -53,9 +53,9 @@ type sess struct {
 	uid        string   // 红果账号 id 缓存（邀请制核对用），随 cookie 变化失效
 	uidName    string
 	uidJar     string
-	profile    *hg.Profile
+	profile    *lvguo.Profile
 	profileAt  time.Time
-	favs       []hg.Entry
+	favs       []lvguo.Entry
 	favsAt     time.Time
 	favsJar    string
 	guestCode  string
@@ -64,18 +64,19 @@ type sess struct {
 // Server 持有全部会话与内容缓存。
 type Server struct {
 	cfg     Config
-	client  *hg.Client
-	content *hg.Content
+	client  *lvguo.Client
+	content *lvguo.Content
 	media   *media.Cache
 	// player 是专门取播放地址的匿名身份：独立设备、永不带账号 cookie。
 	// 红果对账号风控时，账号用过的设备取流全部空包（换新设备一带账号也立刻失效）；
 	// 匿名的新设备不受影响。所以取流与账号彻底分开。
-	player *hg.Account
+	player *lvguo.Account
 	gate   *gate // 邀请制访问（LVGUO_INVITE=1 时启用）
 
 	mu             sync.Mutex
+	sessionKey     []byte
 	sessions       map[string]*sess
-	guestDevices   map[string]*hg.DeviceStore
+	guestDevices   map[string]*lvguo.DeviceStore
 	guestLibraries map[string]*library
 	guestLatest    func(*sess, []string) (map[string]int64, error) // optional test seam
 	limiter        *limiter
@@ -84,14 +85,18 @@ type Server struct {
 }
 
 func New(cfg Config) (*Server, error) {
-	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return nil, err
 	}
-	c := &hg.Client{Devices: hg.NewDeviceStore(cfg.DataDir)}
-	s := &Server{cfg: cfg, client: c, content: hg.NewContent(c), media: media.NewCache(512 << 20),
-		sessions: map[string]*sess{}, limiter: newLimiter(), dev: os.Getenv("LVGUO_DEV") == "1"}
-	playDev := hg.NewDeviceStore(filepath.Join(cfg.DataDir, "player"))
-	s.player = &hg.Account{C: &hg.Client{Devices: playDev}, U: hg.NewUser(), Dev: playDev}
+	sessKey, err := loadSessionKey(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	c := &lvguo.Client{Devices: lvguo.NewDeviceStore(cfg.DataDir)}
+	s := &Server{cfg: cfg, client: c, content: lvguo.NewContent(c), media: media.NewCache(512 << 20),
+		sessionKey: sessKey, sessions: map[string]*sess{}, limiter: newLimiter(), dev: os.Getenv("LVGUO_DEV") == "1"}
+	playDev := lvguo.NewDeviceStore(filepath.Join(cfg.DataDir, "player"))
+	s.player = &lvguo.Account{C: &lvguo.Client{Devices: playDev}, U: lvguo.NewUser(), Dev: playDev}
 	s.gate = newGate(cfg.DataDir)
 	s.gate.identity = s.hongguoIdentity
 	s.gate.ensureSession = func(w http.ResponseWriter, r *http.Request) { s.session(w, r) }
@@ -114,16 +119,20 @@ func (s *Server) load() {
 	if err != nil {
 		return
 	}
-	var m map[string]map[string]string
-	if json.Unmarshal(b, &m) != nil {
+	m, migrated, err := decryptSessionStore(s.sessionKey, b)
+	if err != nil {
+		log.Printf("会话加载失败（密钥不匹配或文件损坏）: %v", err)
 		return
 	}
 	for id, jar := range m {
-		u := hg.NewUser()
+		u := lvguo.NewUser()
 		u.Set(jar)
-		ss := &sess{id: id, acct: &hg.Account{C: s.client, U: u}, lastActive: time.Now(), lastSaved: u.Cookie()}
+		ss := &sess{id: id, acct: &lvguo.Account{C: s.client, U: u}, lastActive: time.Now(), lastSaved: u.Cookie()}
 		ss.acct.SetDev(s.ownDevice(id))
 		s.sessions[id] = ss
+	}
+	if migrated && len(s.sessions) > 0 {
+		s.saveLocked()
 	}
 }
 
@@ -134,7 +143,11 @@ func (s *Server) saveLocked() {
 			m[id] = ss.acct.U.Snapshot()
 		}
 	}
-	b, _ := json.Marshal(m)
+	b, err := encryptSessionStore(s.sessionKey, m)
+	if err != nil {
+		log.Printf("会话加密保存失败: %v", err)
+		return
+	}
 	tmp := s.file() + ".tmp"
 	if os.WriteFile(tmp, b, 0o600) == nil {
 		_ = os.Rename(tmp, s.file())
@@ -142,22 +155,22 @@ func (s *Server) saveLocked() {
 }
 
 // ownDevice 是登录会话独占的设备身份（首次使用时向上游注册一次，之后落盘复用）。
-func (s *Server) ownDevice(id string) *hg.DeviceStore {
+func (s *Server) ownDevice(id string) *lvguo.DeviceStore {
 	h := sha256.Sum256([]byte(id))
-	return hg.NewDeviceStore(filepath.Join(s.cfg.DataDir, "devices", hex.EncodeToString(h[:8])))
+	return lvguo.NewDeviceStore(filepath.Join(s.cfg.DataDir, "devices", hex.EncodeToString(h[:8])))
 }
 
 // guestDevice is called while holding s.mu so all browsers sharing one code
 // also share the same registered anonymous device and its lock.
-func (s *Server) guestDevice(code string) *hg.DeviceStore {
+func (s *Server) guestDevice(code string) *lvguo.DeviceStore {
 	if s.guestDevices == nil {
-		s.guestDevices = make(map[string]*hg.DeviceStore)
+		s.guestDevices = make(map[string]*lvguo.DeviceStore)
 	}
 	if d := s.guestDevices[code]; d != nil {
 		return d
 	}
 	h := sha256.Sum256([]byte(code))
-	d := hg.NewDeviceStore(filepath.Join(s.cfg.DataDir, "guest-devices", hex.EncodeToString(h[:8])))
+	d := lvguo.NewDeviceStore(filepath.Join(s.cfg.DataDir, "guest-devices", hex.EncodeToString(h[:8])))
 	s.guestDevices[code] = d
 	return d
 }
@@ -208,7 +221,7 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) *sess {
 	if recoverGuest != "" {
 		id = recoverGuest
 	}
-	ss := &sess{id: id, acct: &hg.Account{C: s.client, U: hg.NewUser()}, lastActive: now}
+	ss := &sess{id: id, acct: &lvguo.Account{C: s.client, U: lvguo.NewUser()}, lastActive: now}
 	if guest != nil {
 		key := guest.GuestID
 		if guest.BrowseOnly {
@@ -226,6 +239,24 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) *sess {
 	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: id, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
 		Secure: r.Header.Get("X-Forwarded-Proto") == "https" || r.TLS != nil, MaxAge: 60 * 60 * 24 * 365})
 	return ss
+}
+
+// rotateSession 在登录成功时轮换浏览器 lv_sid，防止会话固定（Session Fixation）攻击。
+func (s *Server) rotateSession(w http.ResponseWriter, r *http.Request, ss *sess) {
+	if ss == nil {
+		return
+	}
+	nextID := newID()
+	s.mu.Lock()
+	oldID := ss.id
+	if oldID != "" && s.sessions[oldID] == ss {
+		delete(s.sessions, oldID)
+	}
+	ss.id = nextID
+	s.sessions[nextID] = ss
+	s.mu.Unlock()
+	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: nextID, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		Secure: r.Header.Get("X-Forwarded-Proto") == "https" || r.TLS != nil, MaxAge: 60 * 60 * 24 * 365})
 }
 
 // persist 在会话 cookie 有变化（登录、续期）时落盘。
@@ -273,7 +304,7 @@ func (s *Server) Handler() http.Handler {
 				switch {
 				case errors.As(err, &he):
 					code = he.code
-				case errors.Is(err, hg.ErrSessionExpired):
+				case errors.Is(err, lvguo.ErrSessionExpired):
 					code = 401
 					s.expire(ss)
 				}
@@ -309,6 +340,9 @@ func (s *Server) Handler() http.Handler {
 	api("/api/guest/import", s.importGuestProgress)
 	api("/api/comments", s.comments)
 	api("/api/play", s.play)
+	mux.HandleFunc("/api/invite/me", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{})
+	})
 	mux.HandleFunc("/media/", s.serveMedia)
 	mux.HandleFunc("/api/tv/model", s.tvModel)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "lvguo-tv") })
@@ -318,7 +352,7 @@ func (s *Server) Handler() http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("/", s.pages)
-	return secure(s.gate.wrap(mux, s.serveFile))
+	return gzipMiddleware(secure(s.gate.wrap(mux, s.serveFile)))
 }
 
 type httpErr struct {
@@ -457,11 +491,26 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, name string) 
 		// 页面与登录 / 邀请状态有关：只许浏览器缓存，CDN 不能存（否则可能把某人的页面给别人）
 		w.Header().Set("Cache-Control", "private, no-cache")
 	} else if strings.HasSuffix(name, ".js") || strings.HasSuffix(name, ".css") || strings.HasSuffix(name, ".webmanifest") {
-		w.Header().Set("Cache-Control", "no-cache")
+		if r.URL.Query().Get("v") == assetETagPrefix {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
 		w.Header().Set("ETag", `"`+assetETagPrefix+`-`+strconv.FormatInt(st.Size(), 36)+`"`)
 	} else {
 		w.Header().Set("Cache-Control", "public, max-age=3600")
 		w.Header().Set("ETag", `"`+assetETagPrefix+`-`+strconv.FormatInt(st.Size(), 36)+`"`)
+	}
+	if name == "pc/index.html" {
+		b, _ := io.ReadAll(f)
+		html := string(b)
+		v := "?v=" + assetETagPrefix
+		for _, asset := range []string{"/shared/tokens.css", "/pc/app.css", "/shared/icons.js", "/shared/core.js", "/pc/app.js"} {
+			html = strings.ReplaceAll(html, `"`+asset+`"`, `"`+asset+v+`"`)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, html)
+		return
 	}
 	rs, ok := f.(io.ReadSeeker)
 	if !ok {
@@ -580,7 +629,7 @@ func (s *Server) hongguoIdentity(r *http.Request) (string, string) {
 	return p.UID, p.Name
 }
 
-func (s *Server) sessionProfile(ss *sess) (*hg.Profile, error) {
+func (s *Server) sessionProfile(ss *sess) (*lvguo.Profile, error) {
 	jar := ss.acct.U.Cookie()
 	s.mu.Lock()
 	if ss.profile != nil && ss.uidJar == jar && time.Since(ss.profileAt) < 2*time.Minute {
@@ -601,11 +650,11 @@ func (s *Server) sessionProfile(ss *sess) (*hg.Profile, error) {
 	return p, nil
 }
 
-func (s *Server) sessionFavorites(ss *sess, fresh bool) ([]hg.Entry, error) {
+func (s *Server) sessionFavorites(ss *sess, fresh bool) ([]lvguo.Entry, error) {
 	jar := ss.acct.U.Cookie()
 	s.mu.Lock()
 	if !fresh && ss.favs != nil && ss.favsJar == jar && time.Since(ss.favsAt) < 30*time.Second {
-		cp := append([]hg.Entry(nil), ss.favs...)
+		cp := append([]lvguo.Entry(nil), ss.favs...)
 		s.mu.Unlock()
 		return cp, nil
 	}
@@ -615,7 +664,7 @@ func (s *Server) sessionFavorites(ss *sess, fresh bool) ([]hg.Entry, error) {
 		return nil, err
 	}
 	s.mu.Lock()
-	ss.favs = append([]hg.Entry(nil), f...)
+	ss.favs = append([]lvguo.Entry(nil), f...)
 	ss.favsAt = time.Now()
 	ss.favsJar = jar
 	s.mu.Unlock()

@@ -35,7 +35,7 @@ public final class Browse {
         q.put("selected_items",type);q.put("sub_selected_items",board);
         q.put("panel_selected_items",filter==null?"":filter);
         q.put("offset",String.valueOf(offset));q.put("session_uuid",session==null?UUID.randomUUID().toString():session);
-        JSONObject root=HgApi.call(BOOKMALL_CELL_CHANGE_PATH,null,q);
+        JSONObject root=LvguoApi.call(BOOKMALL_CELL_CHANGE_PATH,null,q);
         JSONObject data=root.optJSONObject("data");
         JSONObject cell=data==null?null:data.optJSONObject("cell_view");
         if(root.optBoolean("_empty") || root.optInt("code",0)!=0 || cell==null)
@@ -240,7 +240,7 @@ public final class Browse {
         Map<String,String> q=new LinkedHashMap<>();q.put("book_id",id);q.put("group_id",id);
         if(episodeId!=null){q.put("item_id",episodeId);q.put("group_id",episodeId);}
         q.put("offset",String.valueOf(offset));q.put("count","20");q.put("sort","1");
-        JSONObject response=HgApi.call("/reading/ugc/novel_comment/"+(episodeId==null?"book":"item")+"/v1/",null,q);
+        JSONObject response=LvguoApi.call("/reading/ugc/novel_comment/"+(episodeId==null?"book":"item")+"/v1/",null,q);
         JSONObject data=response.optJSONObject("data");
         if(response.optBoolean("_empty") || response.optInt("code",-1)!=0 || data==null)throw new java.io.IOException("评论加载未完成");
         return data;

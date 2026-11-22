@@ -60,7 +60,7 @@ public final class Repo {
     /** 原始取流没有独立匿名身份这一层，恢复时清缓存重取即可（兼容播放器的恢复流程）。 */
     public static void refreshPlaybackProfile(String vid) {
         invalidatePlay(vid);
-        ink.pengfei.lvguo.net.hgsign.HgPlayback.rotateModuleIdentity();
+        ink.pengfei.lvguo.net.lvguosign.LvguoPlayback.rotateModuleIdentity();
     }
 
     /** 空 body（Content-Length: 0）表示被静默拒绝，退避后重试 */
@@ -69,7 +69,7 @@ public final class Repo {
         JSONObject last = null;
         for (int attempt = 0; attempt < 3; attempt++) {
             if (attempt > 0) Thread.sleep(700L * attempt);
-            last = HgApi.call(path, body, extra);
+            last = LvguoApi.call(path, body, extra);
             if (last.length() > 0 && !last.optBoolean("_empty")) return last;
             // HTTP 200 + Content-Length: 0 是服务端确定性空包（已实测确诊），
             // 退避重试没有意义，直接失败走降级，避免用户干等。
@@ -113,7 +113,7 @@ public final class Repo {
             q.put("session_uuid", session);
             if (offset > 0) q.put("offset", String.valueOf(offset));
 
-            JSONObject j = HgApi.call(Browse.BOOKMALL_CELL_CHANGE_PATH, null, q);
+            JSONObject j = LvguoApi.call(Browse.BOOKMALL_CELL_CHANGE_PATH, null, q);
             if (j.optInt("code", -1) != 0) break;
             JSONObject cv = j.optJSONObject("data");
             cv = cv == null ? null : cv.optJSONObject("cell_view");
@@ -256,7 +256,7 @@ public final class Repo {
         biz.put("need_all_video_definition", true);
         biz.put("need_mp4_align", true);
         biz.put("use_os_player", false);
-        biz.put("device_level", HgApi.DEVICE_LEVEL_H265);   // >=4 才有标准 H.265
+        biz.put("device_level", LvguoApi.DEVICE_LEVEL_H265);   // >=4 才有标准 H.265
         biz.put("screen_width_px", "1350");
         biz.put("source", 7);
         biz.put("video_id_type", 1);
@@ -325,7 +325,7 @@ public final class Repo {
         List<Season> hit=cacheGet(key);if(seasonListComplete(hit,seriesId))return hit;
         Map<String,String> q=new java.util.LinkedHashMap<>();
         q.put("album_id",albumId);q.put("count","100");q.put("offset","0");
-        JSONObject root=HgApi.call("/api/novel/origin/album/get_video_list/v1/",null,q);
+        JSONObject root=LvguoApi.call("/api/novel/origin/album/get_video_list/v1/",null,q);
         JSONObject data=root.optJSONObject("data");
         JSONArray videos=data==null?null:data.optJSONArray("video_data_list");
         if(root.optInt("code",-1)!=0 || videos==null)throw new java.io.IOException("季列表加载失败，请重试");
@@ -359,6 +359,7 @@ public final class Repo {
         }
         boolean containsCurrent=false;for(Season row:result)if(seriesId.equals(row.id))containsCurrent=true;
         if(!containsCurrent){Detail current=detail(seriesId);if(current.multiSeason&&current.seasonIndex>0){Season row=new Season();row.id=seriesId;row.title=current.title;row.cover=current.cover;row.number=current.seasonIndex;row.episodes=current.episodes.size();result.add(row);}}
+        assignSeasonNumbers(result);
         java.util.Collections.sort(result,(a,b)->Integer.compare(a.number,b.number));
         if(result.isEmpty())throw new java.io.IOException("季列表暂未返回，请重试");
         List<Series> indexed=new ArrayList<>();for(Season season:result)if(season.episodes>0){
@@ -369,6 +370,132 @@ public final class Repo {
         Catalog.merge(indexed);
         try{JSONArray rows=new JSONArray();for(Season season:result)rows.put(new JSONObject().put("id",season.id).put("title",season.title).put("cover",season.cover).put("number",season.number).put("count",season.episodes));ink.pengfei.lvguo.App.prefs().edit().putString("season_meta_v2_"+albumId,new JSONObject().put("ts",System.currentTimeMillis()).put("rows",rows).toString()).apply();}catch(Exception ignored){}
         cachePut(key,result,5*60*1000L);return result;
+    }
+
+    /**
+     * 详情页快速季列表：只读合集列表即可拿到真实季（duration>0）和已公布未上线的下一季，
+     * 实测与逐季详情校验结果完全一致，约 0.2s。集数未知时用 1 占位，仅供详情页季按钮使用；
+     * 播放器/接口需要真实集数时仍走 {@link #seasons(String,String)}。
+     */
+    /** 同步读取内存中的快速季缓存，未命中返回 null（供播放器选集抽屉避免重复骨架闪烁）。 */
+    public static List<Season> cachedSeasonsQuick(String seriesId,String albumId){
+        if(albumId==null||albumId.isEmpty())return null;
+        List<Season> hit=cacheGet("seasons_quick:"+albumId);
+        if(seasonListComplete(hit,seriesId))return hit;
+        List<Season> full=cacheGet("seasons:"+albumId);
+        return seasonListComplete(full,seriesId)?full:null;
+    }
+
+    public static List<Season> seasonsQuick(String seriesId,String albumId)throws Exception{
+        if(albumId==null||albumId.isEmpty())return new ArrayList<>();
+        String key="seasons_quick:"+albumId;
+        List<Season> hit=cacheGet(key);if(seasonListComplete(hit,seriesId))return hit;
+        Map<String,String> q=new java.util.LinkedHashMap<>();
+        q.put("album_id",albumId);q.put("count","100");q.put("offset","0");
+        JSONObject root=LvguoApi.call("/api/novel/origin/album/get_video_list/v1/",null,q);
+        JSONArray videos=root==null?null:root.optJSONObject("data")==null?null:root.optJSONObject("data").optJSONArray("video_data_list");
+        if(root==null||root.optInt("code",-1)!=0||videos==null)return seasons(seriesId,albumId);
+        java.util.LinkedHashMap<String,Object[]> rows=new java.util.LinkedHashMap<>();
+        for(int n=0;n<videos.length();n++){
+            JSONObject v=videos.optJSONObject(n);if(v==null)continue;
+            JSONObject common=v.optJSONObject("common");if(common==null)continue;
+            String id=v.optString("video_id",""),title=common.optString("title","").trim();if(!id.matches("[0-9]+")||title.isEmpty())continue;
+            boolean real=common.optLong("duration",0)>0;
+            String normTitle=java.text.Normalizer.normalize(title,java.text.Normalizer.Form.NFKC);
+            Object[] old=rows.get(normTitle);
+            if(old==null)rows.put(normTitle,new Object[]{id,common.optString("cover",""),real,title});
+            else if(real&&!((Boolean)old[2]))rows.put(normTitle,new Object[]{id,common.optString("cover",""),true,title});
+        }
+        Detail cur=cacheGet("detail:"+seriesId);if(cur==null)cur=detail(seriesId);
+        int expected=cur==null?0:cur.seasonIndex;
+        int currentPos=-1,pos=0;
+        for(Object[] row:rows.values()){if(seriesId.equals(row[0]))currentPos=pos;pos++;}
+        // 合集顺序与当前季号对不上时退回逐季校验，避免把缺失季按顺序编错。
+        if(expected>0&&(currentPos<0||currentPos+1!=expected))return seasons(seriesId,albumId);
+        List<Season> result=new ArrayList<>();
+        for(Object[] row:rows.values()){
+            String id=(String)row[0];boolean real=(Boolean)row[2];String title=(String)row[3];
+            // 0 时长的条目只有标题带“季”的才是已公布下一季，其余是同季占位/预告。
+            if(!real&&!title.contains("季"))continue;
+            int parsed=seasonNumberFromTitle(title);
+            Season season=new Season();season.id=id;season.title=title;season.cover=(String)row[1];
+            season.number=parsed>0?parsed:(id.equals(seriesId)&&expected>0?expected:0);
+            Detail known=cacheGet("detail:"+id);
+            season.episodes=known!=null&&!known.episodes.isEmpty()?known.episodes.size():(real?1:0);
+            result.add(season);
+        }
+        assignSeasonNumbers(result);
+        java.util.Collections.sort(result,(a,b)->Integer.compare(a.number,b.number));
+        cachePut(key,result,5*60*1000L);
+        return result;
+    }
+
+    /** 保证同一合集内季号唯一：优先保留标题显式季号，无季号或冲突续作按合集顺序顺延。 */
+    private static void assignSeasonNumbers(List<Season> list) {
+        if (list == null || list.isEmpty()) return;
+        java.util.Set<Integer> used = new java.util.HashSet<>();
+        boolean[] fixed = new boolean[list.size()];
+        int maxN = 0;
+        // 1. 优先锁定标题明确带「第N季」的条目
+        for (int i = 0; i < list.size(); i++) {
+            int explicit = seasonNumberFromTitle(list.get(i).title);
+            if (explicit > 0 && used.add(explicit)) {
+                list.get(i).number = explicit;
+                fixed[i] = true;
+                if (explicit > maxN) maxN = explicit;
+            }
+        }
+        // 2. 其余无显式季号或季号冲突的条目按合集顺序分配未占用季号
+        for (int i = 0; i < list.size(); i++) {
+            if (fixed[i]) continue;
+            int n = list.get(i).number;
+            if (n <= 0 || used.contains(n)) {
+                int cand = i + 1;
+                if (used.contains(cand)) cand = maxN + 1;
+                while (used.contains(cand)) cand++;
+                n = cand;
+            }
+            list.get(i).number = n;
+            used.add(n);
+            if (n > maxN) maxN = n;
+        }
+    }
+
+    private static int seasonNumberFromTitle(String title) {
+        if (title == null || title.isEmpty()) return 0;
+        String norm = java.text.Normalizer.normalize(title, java.text.Normalizer.Form.NFKC);
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("第([0-9一二三四五六七八九十两百]+)[季部]").matcher(norm);
+        if (!m.find()) return 0;
+        String raw = m.group(1);
+        if (raw.matches("[0-9]+")) {
+            try { return Integer.parseInt(raw); } catch (NumberFormatException ignored) { return 0; }
+        }
+        return parseChineseNumber(raw);
+    }
+
+    private static int parseChineseNumber(String s) {
+        if (s == null || s.isEmpty()) return 0;
+        int total = 0, cur = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            int d;
+            switch (c) {
+                case '一': d = 1; break;
+                case '二': case '两': d = 2; break;
+                case '三': d = 3; break;
+                case '四': d = 4; break;
+                case '五': d = 5; break;
+                case '六': d = 6; break;
+                case '七': d = 7; break;
+                case '八': d = 8; break;
+                case '九': d = 9; break;
+                case '十': total += (cur == 0 ? 1 : cur) * 10; cur = 0; continue;
+                case '百': total += (cur == 0 ? 1 : cur) * 100; cur = 0; continue;
+                default: return 0;
+            }
+            cur = d;
+        }
+        return total + cur;
     }
 
     private static Detail parseAlbumDetail(JSONObject j, String seriesId) throws Exception {
@@ -615,66 +742,206 @@ public final class Repo {
         List<Gear> cached = cacheGet(ck);
         if (cached != null) return cached;
 
-        // The verified local module signs and normalizes playback; the model service is a fallback.
+        // The verified local module signs and normalizes playback; the server model service is the fallback.
         PlaybackConfig playbackConfig = PlaybackConfig.get();
-        JSONObject j; boolean localModule = true;
-        try { j = new JSONObject(TVPlaybackModule.play(vid)); }
+        JSONObject j;
+        try { j = new JSONObject(TVPlaybackModule.play(vid, playbackConfig)); }
         catch (Exception local) {
-            localModule = false;
             try { j = new JSONObject(PlayFallback.play(vid, playbackConfig)); }
             catch (Exception remote) { throw new IllegalStateException("取播放信息失败", remote); }
         }
         if (j.optInt("code", -1) != 0) throw new IllegalStateException("取播放信息失败");
-        JSONObject data = j.optJSONObject(localModule ? "data" : playbackConfig.dataField);
+        JSONObject data = jsonObject(j.opt(playbackConfig.dataField));
+        if (data == null) data = j.optJSONObject("data");
         if (data == null) throw new IllegalStateException("播放节点为空");
-        // 单集 video_model：data.video_model 直挂；兼容 data[vid].video_model
+
+        JSONObject nested = jsonObject(data.opt("video_model_data"));
+        if (nested != null) data = nested;
+
         JSONObject node = data.optJSONObject(vid);
-        Object vmObj = node != null ? node.opt(localModule ? "video_model" : playbackConfig.modelField) : data.opt(localModule ? "video_model" : playbackConfig.modelField);
-        JSONObject vm = vmObj instanceof JSONObject ? (JSONObject) vmObj
-                : new JSONObject(vmObj instanceof String ? (String) vmObj : "{}");
-        JSONArray list = vm.optJSONArray(localModule ? "video_list" : playbackConfig.listField);
-        List<Gear> out = new ArrayList<>();
-        if (list == null) return out;
-        for (int i = 0; i < list.length(); i++) {
-            JSONObject v = list.optJSONObject(i);
-            if (v == null) continue;
-            JSONObject m = v.optJSONObject("video_meta");
-            JSONObject ei = v.optJSONObject("encrypt_info");
-            Gear g = new Gear();
-            g.definition = m == null ? "" : optStr(m, "definition", "");
-            g.codec = m == null ? "" : m.optString("codec_type", "");
-            g.fps = m == null ? 0 : (float)m.optDouble("fps", 0);
-            g.width = m == null ? 0 : m.optInt("vwidth", 0);
-            g.height = m == null ? 0 : m.optInt("vheight", 0);
-            g.size = m == null ? 0 : m.optLong("size", 0);
-            g.mainUrl = v.optString("main_url", "");
-            g.backupUrl = v.optString("backup_url", "");
-            g.encrypted = ei != null && ei.optBoolean("encrypt", false);
-            g.spadeA = ei == null ? null : ei.optString("spade_a", null);
-            g.kid = ei == null ? null : ei.optString("kid", null);
-            if (!g.mainUrl.isEmpty()) out.add(g);
+        Object vmObj = null;
+        if (node != null) {
+            vmObj = node.opt(playbackConfig.modelField);
+            if (vmObj == null) vmObj = node.opt("video_model");
+            if (vmObj == null && node.opt("video_list") != null) vmObj = node;
         }
+        if (vmObj == null) vmObj = data.opt(playbackConfig.modelField);
+        if (vmObj == null) vmObj = data.opt("video_model");
+        if (vmObj == null && data.opt("video_list") != null) vmObj = data;
+
+        JSONObject vm = jsonObject(vmObj);
+        JSONArray list = vm == null ? null : rows(vm.opt(playbackConfig.listField));
+        if (list == null && vm != null) list = rows(vm.opt("video_list"));
+        List<Gear> out = parseGearRows(list);
+        out = usableGears(out);
         if (!out.isEmpty()) cachePut(ck, out, 5 * 60 * 1000L);
         return out;
     }
 
-    /** 按用户偏好 / 设备上限挑档 */
+    private static List<Gear> parseGearRows(JSONArray list) {
+        List<Gear> out = new ArrayList<>();
+        if (list == null) return out;
+        for (int i = 0; i < list.length(); i++) {
+            JSONObject v = jsonObject(list.opt(i));
+            if (v == null) continue;
+            JSONObject meta = jsonObject(v.opt("video_meta"));
+            JSONObject enc = jsonObject(v.opt("encrypt_info"));
+            JSONObject info = meta != null ? meta : v;
+
+            Gear g = new Gear();
+            g.definition = text(info, "definition", text(v, "definition", text(v, "quality_desc", "")));
+            g.codec = text(info, "codec_type", text(v, "codec_type", ""));
+            g.fps = (float) number(info, "fps", number(v, "fps", 0));
+            g.width = (int) number(info, "vwidth", 0);
+            if (g.width == 0) g.width = (int) number(v, "width", (int) number(v, "vwidth", 0));
+            g.height = (int) number(info, "vheight", 0);
+            if (g.height == 0) g.height = (int) number(v, "height", (int) number(v, "vheight", 0));
+            g.size = (long) number(info, "size", 0);
+            if (g.size == 0) g.size = (long) number(v, "size", 0);
+            g.mainUrl = text(v, "main_url", "");
+            g.encrypted = bool(enc == null ? null : enc.opt("encrypt")) || bool(v.opt("encrypt"));
+            g.spadeA = enc == null ? text(v, "spade_a", null) : text(enc, "spade_a", text(v, "spade_a", null));
+            g.kid = enc == null ? text(v, "kid", null) : text(enc, "kid", text(v, "kid", null));
+
+            addBackupURLs(g.backupUrls, v.opt("backup_url"));
+            addBackupURLs(g.backupUrls, v.opt("backup_url_1"));
+            addBackupURLs(g.backupUrls, v.opt("backup_url_2"));
+            addBackupURLs(g.backupUrls, v.opt("backup_url_3"));
+            addBackupURLs(g.backupUrls, v.opt("BackupPlayUrl"));
+            addBackupURLs(g.backupUrls, v.opt("backup_url_list"));
+            if (!g.mainUrl.isEmpty()) g.backupUrls.remove(g.mainUrl);
+            if (!g.backupUrls.isEmpty()) g.backupUrl = g.backupUrls.get(0);
+            if (!g.mainUrl.isEmpty()) out.add(g);
+        }
+        return mergeGears(out);
+    }
+
+    /** 同清晰度只保留一份；后到的 H.264/H.265 可以替换前面的 ByteVC。 */
+    private static List<Gear> mergeGears(List<Gear> gears) {
+        java.util.LinkedHashMap<String, Gear> byKey = new java.util.LinkedHashMap<>();
+        for (Gear g : gears) {
+            String key = g.definition == null ? "" : g.definition;
+            if (key.isEmpty() && g.width > 0 && g.height > 0) key = g.width + "x" + g.height;
+            if (key.isEmpty()) key = g.mainUrl;
+            Gear previous = byKey.get(key);
+            if (previous == null || g.codecRank() < previous.codecRank()) byKey.put(key, g);
+        }
+        return new ArrayList<>(byKey.values());
+    }
+
+    /** 只要存在电视可解码的 H.264/H.265，就把 ByteVC/VVC 档位移除。 */
+    private static List<Gear> usableGears(List<Gear> gears) {
+        boolean compatible = false;
+        for (Gear g : gears) if (!g.isProprietary() && g.mainUrl != null && !g.mainUrl.isEmpty()) { compatible = true; break; }
+        if (!compatible) return gears;
+        List<Gear> out = new ArrayList<>();
+        for (Gear g : gears) if (!g.isProprietary()) out.add(g);
+        return out;
+    }
+
+    /** 按用户偏好 / 设备上限挑档；自动选档优先 H.264，其次 H.265。 */
     public static Gear pickGear(List<Gear> gears, String prefer, int maxShortSide) {
         if (gears == null || gears.isEmpty()) return null;
         int limit = maxShortSide > 0 ? maxShortSide : 1080;
-        if (prefer != null) {
-            for (Gear g : gears) {
-                if (prefer.equals(g.definition) && g.shortSide() > 0
-                        && g.shortSide() <= limit) return g;
-            }
-        }
-        Gear best = null;
+        Gear exact = null, h264 = null, best = null;
         for (Gear g : gears) {
+            if (g == null || g.isProprietary()) continue;
             int ss = g.shortSide();
+            if (prefer != null && prefer.equals(g.definition) && (ss <= 0 || ss <= limit)) {
+                if (exact == null || g.codecRank() < exact.codecRank()) exact = g;
+            }
             if (ss <= 0 || ss > limit) continue;
-            if (best == null || ss > best.shortSide()) best = g;
+            if (g.isH264() && betterGear(g, h264)) h264 = g;
+            if (betterGear(g, best)) best = g;
         }
-        return best;
+        if (exact != null) return exact;
+        return h264 != null ? h264 : best;
+    }
+
+    private static boolean betterGear(Gear candidate, Gear current) {
+        if (current == null) return true;
+        if (candidate.shortSide() != current.shortSide()) return candidate.shortSide() > current.shortSide();
+        return candidate.codecRank() < current.codecRank();
+    }
+
+    private static JSONObject jsonObject(Object value) {
+        if (value instanceof JSONObject) return (JSONObject) value;
+        if (value instanceof JSONArray) {
+            JSONArray array = (JSONArray) value;
+            return array.length() == 0 ? null : jsonObject(array.opt(0));
+        }
+        if (value instanceof String) {
+            String raw = ((String) value).trim();
+            if (!raw.startsWith("{")) return null;
+            try { return new JSONObject(raw); } catch (Exception ignored) { return null; }
+        }
+        return null;
+    }
+
+    private static JSONArray rows(Object value) {
+        if (value instanceof JSONArray) return (JSONArray) value;
+        if (value instanceof JSONObject) {
+            JSONObject object = (JSONObject) value;
+            JSONArray out = new JSONArray();
+            java.util.Iterator<String> keys = object.keys();
+            while (keys.hasNext()) {
+                Object row = object.opt(keys.next());
+                if (row != null && row != JSONObject.NULL) out.put(row);
+            }
+            return out.length() == 0 ? null : out;
+        }
+        if (value instanceof String) {
+            String raw = ((String) value).trim();
+            if (raw.isEmpty()) return null;
+            try {
+                if (raw.startsWith("[")) return rows(new JSONArray(raw));
+                if (raw.startsWith("{")) return rows(new JSONObject(raw));
+            } catch (Exception ignored) { }
+        }
+        return null;
+    }
+
+    private static String text(JSONObject o, String key, String def) {
+        if (o == null) return def;
+        String value = o.optString(key, null);
+        return value == null || value.isEmpty() ? def : value;
+    }
+
+    private static double number(JSONObject o, String key, double def) {
+        if (o == null) return def;
+        Object value = o.opt(key);
+        if (value instanceof Number) return ((Number) value).doubleValue();
+        if (value instanceof String) {
+            try { return Double.parseDouble(((String) value).trim()); } catch (Exception ignored) { }
+        }
+        return def;
+    }
+
+    private static boolean bool(Object value) {
+        if (value instanceof Boolean) return (Boolean) value;
+        if (value instanceof Number) return ((Number) value).doubleValue() != 0;
+        if (value instanceof String) {
+            String text = ((String) value).trim();
+            return "true".equalsIgnoreCase(text) || "1".equals(text);
+        }
+        return false;
+    }
+
+    private static void addBackupURLs(List<String> out, Object value) {
+        if (value == null || value == JSONObject.NULL) return;
+        if (value instanceof JSONArray) {
+            JSONArray array = (JSONArray) value;
+            for (int i = 0; i < array.length(); i++) addBackupURLs(out, array.opt(i));
+            return;
+        }
+        if (value instanceof String) {
+            String raw = ((String) value).trim();
+            if (raw.startsWith("[")) {
+                try { addBackupURLs(out, new JSONArray(raw)); } catch (Exception ignored) { }
+                return;
+            }
+            if (raw.startsWith("https://") && !out.contains(raw)) out.add(raw);
+        }
     }
 
     private static String optStr(JSONObject o, String key, String def) {

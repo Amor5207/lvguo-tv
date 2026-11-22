@@ -1,4 +1,4 @@
-package hgplay
+package lvguoplay
 
 // Account and playback request builders share these signing primitives while
 // retaining separate profiles. Signing stays local; no external signing service

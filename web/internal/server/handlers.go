@@ -11,13 +11,13 @@ import (
 	"sync"
 	"time"
 
-	"lvguo/internal/hg"
+	"lvguo/internal/lvguo"
 )
 
 type view = map[string]any
 
-func series(in []hg.Series) []hg.Series {
-	out := make([]hg.Series, len(in))
+func series(in []lvguo.Series) []lvguo.Series {
+	out := make([]lvguo.Series, len(in))
 	for i, s := range in {
 		s.Cover = imgURL(s.Cover)
 		out[i] = s
@@ -25,14 +25,14 @@ func series(in []hg.Series) []hg.Series {
 	return out
 }
 
-func page(p *hg.Page) *hg.Page {
+func page(p *lvguo.Page) *lvguo.Page {
 	cp := *p
 	cp.Items = series(p.Items)
 	return &cp
 }
 
-func entries(in []hg.Entry) []hg.Entry {
-	out := make([]hg.Entry, len(in))
+func entries(in []lvguo.Entry) []lvguo.Entry {
+	out := make([]lvguo.Entry, len(in))
 	for i, e := range in {
 		e.Cover = imgURL(e.Cover)
 		out[i] = e
@@ -45,6 +45,16 @@ func (s *Server) cookie(ss *sess) string {
 		return ss.acct.U.Cookie()
 	}
 	return ""
+}
+
+// playerFor keeps anonymous playback for guests and the TV fallback, while a
+// logged-in browser uses its own account device and cookie for the upstream
+// playback model request.
+func (s *Server) playerFor(ss *sess) *lvguo.Account {
+	if ss != nil && ss.acct != nil && ss.acct.U.LoggedIn() {
+		return ss.acct
+	}
+	return s.player
 }
 
 func (s *Server) auth(ss *sess) error {
@@ -66,7 +76,7 @@ func (s *Server) me(ss *sess, w http.ResponseWriter, r *http.Request) (any, erro
 		return view{"loggedIn": false}, nil
 	}
 	if s.dev {
-		return view{"loggedIn": true, "daysLeft": 30, "profile": hg.Profile{UID: "1", Name: "绿果用户", Signature: "界面调试账号", WatchMs: 86400000, Days: 42}}, nil
+		return view{"loggedIn": true, "daysLeft": 30, "profile": lvguo.Profile{UID: "1", Name: "绿果用户", Signature: "界面调试账号", WatchMs: 86400000, Days: 42}}, nil
 	}
 	p, err := s.sessionProfile(ss)
 	if err != nil {
@@ -92,7 +102,7 @@ func (s *Server) loginStart(ss *sess, w http.ResponseWriter, r *http.Request) (a
 	if !s.limiter.allow("qr:"+clientIP(r), 6, 12) {
 		return nil, &httpErr{429, "二维码获取太频繁，请稍后再试"}
 	}
-	qr, err := hg.NewQR()
+	qr, err := lvguo.NewQR()
 	if err != nil {
 		return nil, err
 	}
@@ -113,9 +123,11 @@ func (s *Server) loginPoll(ss *sess, w http.ResponseWriter, r *http.Request) (an
 	if err != nil {
 		return nil, err
 	}
-	if state == hg.QRConfirmed {
+	if state == lvguo.QRConfirmed {
+		s.rotateSession(w, r, ss)
 		ss.acct.SetDev(s.ownDevice(ss.id))
 		ss.acct.U.Set(jar)
+		go ss.acct.RefreshSettings()
 		s.mu.Lock()
 		ss.qr = nil
 		s.mu.Unlock()
@@ -135,9 +147,9 @@ func (s *Server) logout(ss *sess, w http.ResponseWriter, r *http.Request) (any, 
 // ------------------------------------------------------------ 内容
 
 func (s *Server) home(ss *sess, w http.ResponseWriter, r *http.Request) (any, error) {
-	out := view{"continue": []hg.Entry{}}
+	out := view{"continue": []lvguo.Entry{}}
 	// 观看历史与推荐流互不依赖，并发取，首页少等一个来回
-	var hist []hg.Entry
+	var hist []lvguo.Entry
 	var herr error
 	done := make(chan struct{})
 	go func() {
@@ -150,16 +162,16 @@ func (s *Server) home(ss *sess, w http.ResponseWriter, r *http.Request) (any, er
 			}
 		}
 	}()
-	chDone := make(chan []hg.FeedChannel, 1)
+	chDone := make(chan []lvguo.FeedChannel, 1)
 	go func() { chDone <- s.content.FeedChannels(ss.acct) }()
 	p, cell, sessID, err := s.content.ForYou(ss.acct, "16", 0, "", "")
 	<-done
 	channels := <-chDone
-	if herr == hg.ErrSessionExpired {
+	if herr == lvguo.ErrSessionExpired {
 		return nil, herr
 	}
 	if herr == nil {
-		var rest []hg.Entry
+		var rest []lvguo.Entry
 		rest = append(rest, hist...)
 		if len(rest) > 12 {
 			rest = rest[:12]
@@ -179,7 +191,7 @@ func (s *Server) home(ss *sess, w http.ResponseWriter, r *http.Request) (any, er
 
 // fyResult 是一批推荐（已凑够两行）及其续取游标。
 type fyResult struct {
-	p             *hg.Page
+	p             *lvguo.Page
 	cell, session string
 }
 
@@ -259,7 +271,7 @@ func (s *Server) forYouBatch(ss *sess, ch string, offset int, cursor, session st
 	if p.More && cell != "" && len(p.Items) < 18 {
 		const step = 6
 		type res struct {
-			p *hg.Page
+			p *lvguo.Page
 			c string
 			s string
 		}
@@ -300,7 +312,7 @@ func (s *Server) forYouBatch(ss *sess, ch string, offset int, cursor, session st
 func (s *Server) rank(ss *sess, w http.ResponseWriter, r *http.Request) (any, error) {
 	board := q(r, "board")
 	if board == "" {
-		board = hg.BoardHot
+		board = lvguo.BoardHot
 	}
 	p, err := s.content.Rank(s.cookie(ss), board, qi(r, "offset"), q(r, "session"))
 	if err != nil {
@@ -356,7 +368,7 @@ func (s *Server) detail(ss *sess, w http.ResponseWriter, r *http.Request) (any, 
 	}
 	cp := *d
 	cp.Cover = imgURL(d.Cover)
-	cp.Episodes = make([]hg.Episode, len(d.Episodes))
+	cp.Episodes = make([]lvguo.Episode, len(d.Episodes))
 	for i, e := range d.Episodes {
 		e.Cover = imgURL(e.Cover)
 		cp.Episodes[i] = e
@@ -364,9 +376,9 @@ func (s *Server) detail(ss *sess, w http.ResponseWriter, r *http.Request) (any, 
 	out := view{"detail": cp}
 	// lite=1：首页推荐懒加载剧集信息，不查收藏 / 历史 / 预约，省掉 4 次上游请求
 	if ss.acct.U.LoggedIn() && !s.dev && q(r, "lite") != "1" {
-		var fav []hg.Entry
-		var h []hg.Entry
-		var reservation *hg.Reservation
+		var fav []lvguo.Entry
+		var h []lvguo.Entry
+		var reservation *lvguo.Reservation
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() { defer wg.Done(); fav, _ = s.sessionFavorites(ss, false) }()
@@ -430,7 +442,7 @@ func (s *Server) history(ss *sess, w http.ResponseWriter, r *http.Request) (any,
 	if !ss.acct.U.LoggedIn() && s.gate != nil {
 		if m := s.gate.guestMember(r); m != nil {
 			if m.BrowseOnly {
-				return view{"items": []hg.Entry{}}, nil
+				return view{"items": []lvguo.Entry{}}, nil
 			}
 			return view{"items": entries(s.guestHistory(m.GuestID, s.cookie(ss), 300))}, nil
 		}
@@ -439,7 +451,7 @@ func (s *Server) history(ss *sess, w http.ResponseWriter, r *http.Request) (any,
 		return nil, err
 	}
 	if s.dev {
-		return view{"items": []hg.Entry{}}, nil
+		return view{"items": []lvguo.Entry{}}, nil
 	}
 	h, err := s.cloudHistory(ss, 300, q(r, "fresh") == "1")
 	if err != nil {
@@ -487,7 +499,7 @@ func (s *Server) favorites(ss *sess, w http.ResponseWriter, r *http.Request) (an
 		return nil, err
 	}
 	if s.dev {
-		return view{"items": []hg.Entry{}}, nil
+		return view{"items": []lvguo.Entry{}}, nil
 	}
 	f, err := s.sessionFavorites(ss, true)
 	if err != nil {
@@ -680,7 +692,8 @@ func (s *Server) play(ss *sess, w http.ResponseWriter, r *http.Request) (any, er
 		s.content.ForgetPlay(vid)
 		s.media.Forget(vid)
 	}
-	gears, err := s.content.Play(s.player, vid)
+	player := s.playerFor(ss)
+	gears, err := s.content.Play(player, vid)
 	if err != nil {
 		// A complete decrypted episode remains playable even when the upstream
 		// model service is temporarily unavailable; never claim an uncached one.
@@ -691,7 +704,7 @@ func (s *Server) play(ss *sess, w http.ResponseWriter, r *http.Request) (any, er
 		return nil, publicPlaybackError(err)
 	}
 	limit, _ := strconv.Atoi(q(r, "max"))
-	g := hg.PickGear(gears, q(r, "q"), limit)
+	g := lvguo.PickGear(gears, q(r, "q"), limit)
 	if g == nil {
 		return nil, &httpErr{502, "没有可播放的清晰度"}
 	}
@@ -704,13 +717,13 @@ func (s *Server) play(ss *sess, w http.ResponseWriter, r *http.Request) (any, er
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i]["short"].(int) < list[j]["short"].(int) })
 	// 异步提前打开流式句柄并预热首片，减少随后 <video> 发起 Range 请求的等待。
-	go s.media.WarmStream(s.content, s.player, vid, g.Definition)
+	go s.media.WarmStream(s.content, player, vid, g.Definition)
 	// 媒体地址带上选中的清晰度，解密后的整集由 /media 提供（支持 Range 拖动）。
 	return view{"src": "/media/" + vid + ".mp4?q=" + url.QueryEscape(g.Definition), "definition": g.Definition, "gears": list}, nil
 }
 
 func publicPlaybackError(err error) error {
-	if errors.Is(err, hg.ErrSessionExpired) {
+	if errors.Is(err, lvguo.ErrSessionExpired) {
 		return err
 	}
 	// Keep route, signature, and fallback details out of the user-facing API.
@@ -718,7 +731,13 @@ func publicPlaybackError(err error) error {
 }
 
 func (s *Server) seasons(ss *sess, w http.ResponseWriter, r *http.Request) (any, error) {
-	list, err := s.content.Seasons(s.cookie(ss), q(r, "id"))
+	var list []lvguo.Season
+	var err error
+	if q(r, "quick") == "1" {
+		list, err = s.content.SeasonsQuick(s.cookie(ss), q(r, "id"))
+	} else {
+		list, err = s.content.Seasons(s.cookie(ss), q(r, "id"))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -734,16 +753,16 @@ func (s *Server) reservations(ss *sess, w http.ResponseWriter, r *http.Request) 
 		return nil, err
 	}
 	if s.dev {
-		return view{"online": []hg.Reservation{}, "upcoming": []hg.Reservation{}}, nil
+		return view{"online": []lvguo.Reservation{}, "upcoming": []lvguo.Reservation{}}, nil
 	}
 	on, errOn := ss.acct.Reservations(true)
 	off, errOff := ss.acct.Reservations(false)
 	if errOn != nil && errOff != nil {
 		return nil, errOn
 	}
-	fix := func(list []hg.Reservation) []hg.Reservation {
+	fix := func(list []lvguo.Reservation) []lvguo.Reservation {
 		if list == nil {
-			return []hg.Reservation{}
+			return []lvguo.Reservation{}
 		}
 		for i := range list {
 			list[i].Cover = imgURL(list[i].Cover)

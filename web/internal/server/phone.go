@@ -14,8 +14,8 @@ import (
 
 	qrcode "github.com/skip2/go-qrcode"
 
-	"lvguo/internal/hg"
-	"lvguo/internal/hgplay"
+	"lvguo/internal/lvguo"
+	"lvguo/internal/lvguoplay"
 )
 
 // 手机号 + 验证码登录：发码、登录、（红果风控要求时）上行短信二次验证。
@@ -25,11 +25,11 @@ func (s *Server) phoneSend(ss *sess, w http.ResponseWriter, r *http.Request) (an
 	if err := decode(r, &in); err != nil {
 		return nil, err
 	}
-	if hgplay.NormalizeCN(in.Phone) == "" {
+	if lvguoplay.NormalizeCN(in.Phone) == "" {
 		return nil, bad("请输入正确的 11 位手机号")
 	}
 	// 发码会真的给这个号码发短信：按来源 IP 与号码双重限速
-	if !s.limiter.allow("sms:"+clientIP(r), 2, 3) || !s.limiter.allow("smsn:"+hgplay.NormalizeCN(in.Phone), 1, 1) {
+	if !s.limiter.allow("sms:"+clientIP(r), 2, 3) || !s.limiter.allow("smsn:"+lvguoplay.NormalizeCN(in.Phone), 1, 1) {
 		return nil, &httpErr{429, "获取太频繁，请稍后再试"}
 	}
 	if s.dev {
@@ -42,7 +42,7 @@ func (s *Server) phoneSend(ss *sess, w http.ResponseWriter, r *http.Request) (an
 	s.mu.Unlock()
 	if pl == nil {
 		var err error
-		if pl, err = hgplay.NewPhoneLogin(ctx); err != nil {
+		if pl, err = lvguoplay.NewPhoneLogin(ctx); err != nil {
 			return nil, err
 		}
 		s.mu.Lock()
@@ -56,26 +56,28 @@ func (s *Server) phoneSend(ss *sess, w http.ResponseWriter, r *http.Request) (an
 }
 
 // phoneDone 登录成功：会话换成新账号，并沿用登录所用的那台设备。
-func (s *Server) phoneDone(ss *sess, jar map[string]string, dev hgplay.AccountDevice) view {
+func (s *Server) phoneDone(w http.ResponseWriter, r *http.Request, ss *sess, jar map[string]string, dev lvguoplay.AccountDevice) view {
+	s.rotateSession(w, r, ss)
 	store := s.ownDevice(ss.id)
-	store.Adopt(hg.Device{ID: dev.DeviceID, IID: dev.InstallID, CDID: dev.CDID, OpenUDID: dev.OpenUDID, ClientUDID: dev.ClientUDID})
+	store.Adopt(lvguo.Device{ID: dev.DeviceID, IID: dev.InstallID, CDID: dev.CDID, OpenUDID: dev.OpenUDID, ClientUDID: dev.ClientUDID})
 	ss.acct.SetDev(store)
 	ss.acct.U.Set(jar)
+	go ss.acct.RefreshSettings()
 	s.mu.Lock()
 	ss.phone, ss.qr = nil, nil
 	s.mu.Unlock()
 	return view{"state": "ok"}
 }
 
-func (s *Server) phoneResult(ss *sess, jar map[string]string, dev hgplay.AccountDevice, err error) (any, error) {
-	var need *hgplay.MFARequired
+func (s *Server) phoneResult(w http.ResponseWriter, r *http.Request, ss *sess, jar map[string]string, dev lvguoplay.AccountDevice, err error) (any, error) {
+	var need *lvguoplay.MFARequired
 	switch {
 	case err == nil:
-		return s.phoneDone(ss, jar, dev), nil
+		return s.phoneDone(w, r, ss, jar, dev), nil
 	case errors.As(err, &need):
 		log.Printf("手机号登录：收到短信验证挑战")
 		return view{"state": "mfa", "number": need.MFA.Number, "content": need.MFA.Content, "qr": smsQR(need.MFA.Number, need.MFA.Content)}, nil
-	case errors.Is(err, hgplay.ErrMFAPending):
+	case errors.Is(err, lvguoplay.ErrMFAPending):
 		return view{"state": "pending"}, nil
 	}
 	return nil, bad(err.Error())
@@ -123,7 +125,7 @@ func (s *Server) phoneLogin(ss *sess, w http.ResponseWriter, r *http.Request) (a
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	jar, dev, err := pl.Login(ctx, in.Code)
-	return s.phoneResult(ss, jar, dev, err)
+	return s.phoneResult(w, r, ss, jar, dev, err)
 }
 
 func (s *Server) phoneVerify(ss *sess, w http.ResponseWriter, r *http.Request) (any, error) {
@@ -139,15 +141,15 @@ func (s *Server) phoneVerify(ss *sess, w http.ResponseWriter, r *http.Request) (
 	switch {
 	case err == nil:
 		log.Printf("手机号登录：短信验证通过")
-	case errors.Is(err, hgplay.ErrMFAPending):
+	case errors.Is(err, lvguoplay.ErrMFAPending):
 		log.Printf("手机号登录：短信验证尚未完成（上游未收到短信）")
 	default:
-		var upstream *hgplay.MFAError
+		var upstream *lvguoplay.MFAError
 		if errors.As(err, &upstream) {
 			log.Printf("手机号登录：短信验证失败 stage=%s code=%s age=%s", upstream.Stage, upstream.Code, upstream.Age)
 		} else {
 			log.Printf("手机号登录：短信验证请求失败")
 		}
 	}
-	return s.phoneResult(ss, jar, dev, err)
+	return s.phoneResult(w, r, ss, jar, dev, err)
 }

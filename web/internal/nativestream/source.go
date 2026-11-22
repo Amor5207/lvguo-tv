@@ -318,6 +318,7 @@ func (s *Source) Warm() {
 	}
 	wg.Wait()
 }
+
 type streamReader struct{ s *Source }
 
 func (sr streamReader) ReadAt(p []byte, off int64) (int, error) {

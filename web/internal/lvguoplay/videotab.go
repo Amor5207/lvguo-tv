@@ -1,4 +1,4 @@
-package hgplay
+package lvguoplay
 
 // video_tab route: bodyless signed GET served by the same upstream when the
 // V5 player POST answers 200 with an empty body (observed 2026-11-20).
@@ -18,6 +18,17 @@ import (
 const videoTabEndpoint = "https://api5-normal-sinfonlinea.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/"
 
 const videoTabUA = "com.phoenix.read/73932 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)"
+
+var videoTabHTTPClient = &http.Client{
+	Timeout:       12 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	Transport: &http.Transport{
+		Proxy:               http.ProxyFromEnvironment,
+		MaxIdleConns:        64,
+		MaxIdleConnsPerHost: 16,
+		IdleConnTimeout:     90 * time.Second,
+	},
+}
 
 func PlayVideoTab(ctx context.Context, vid string) (map[string]any, error) {
 	if !validID(vid) {
@@ -59,8 +70,7 @@ func PlayVideoTab(ctx context.Context, vid string) (map[string]any, error) {
 		}
 		req.Header.Set(h[0], h[1])
 	}
-	client := &http.Client{Timeout: 12 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, err := client.Do(req)
+	resp, err := videoTabHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

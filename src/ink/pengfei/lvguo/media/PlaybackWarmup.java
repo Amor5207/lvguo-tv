@@ -19,9 +19,14 @@ public final class PlaybackWarmup {
             try {
                 Repo.Detail detail=Repo.detail(id);
                 if(token!=generation)return;
-                if(!detail.episodes.isEmpty())Repo.play(detail.episodes.get(0).vid,HgApi.DEVICE_LEVEL_H265);
+                if(!detail.episodes.isEmpty()){
+                    int epIdx=0;
+                    ink.pengfei.lvguo.store.Store.Item watched=ink.pengfei.lvguo.store.Store.watched(id);
+                    if(watched!=null && watched.episodeIndex>=0 && watched.episodeIndex<detail.episodes.size())epIdx=watched.episodeIndex;
+                    Repo.play(detail.episodes.get(epIdx).vid,LvguoApi.DEVICE_LEVEL_H265);
+                }
                 last=id;
             }catch(Exception ignored){}
-        },600,TimeUnit.MILLISECONDS);
+        },300,TimeUnit.MILLISECONDS);
     }
 }

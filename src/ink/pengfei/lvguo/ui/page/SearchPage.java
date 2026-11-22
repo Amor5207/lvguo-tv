@@ -17,7 +17,7 @@ import ink.pengfei.lvguo.model.Series;
 import ink.pengfei.lvguo.net.Catalog;
 import ink.pengfei.lvguo.net.Browse;
 import ink.pengfei.lvguo.net.OnlineSearch;
-import ink.pengfei.lvguo.net.HgApi;
+import ink.pengfei.lvguo.net.LvguoApi;
 import ink.pengfei.lvguo.net.Repo;
 import ink.pengfei.lvguo.ui.IconView;
 import ink.pengfei.lvguo.ui.Page;

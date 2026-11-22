@@ -1,4 +1,4 @@
-package hg
+package lvguo
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 
 	"lvguo/internal/sign"
 
-	"lvguo/internal/hgplay"
+	"lvguo/internal/lvguoplay"
 )
 
 // Account 把一个登录态 User 与内容通道 Client 绑在一起，提供账号读写。
@@ -681,8 +681,8 @@ func (a *Account) historyUpdate(body map[string]any) (map[string]any, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	m, err := hgplay.AccountPost(ctx, AppHost, "/reading/bookapi/read_history/update/v1/",
-		hgplay.AccountDevice{DeviceID: dev.ID, InstallID: dev.IID, CDID: dev.CDID, OpenUDID: dev.OpenUDID}, a.U.Cookie(), body)
+	m, err := lvguoplay.AccountPost(ctx, AppHost, "/reading/bookapi/read_history/update/v1/",
+		lvguoplay.AccountDevice{DeviceID: dev.ID, InstallID: dev.IID, CDID: dev.CDID, OpenUDID: dev.OpenUDID}, a.U.Cookie(), body)
 	if err != nil {
 		return nil, err
 	}
@@ -806,13 +806,19 @@ func (a *Account) Reservations(online bool) ([]Reservation, error) {
 		if sd == nil {
 			sd = map[string]any{}
 		}
-		id := nz(str(row["item_id"]), str(sd["series_id"]))
-		if !digits.MatchString(id) {
-			continue
-		}
 		on := online
 		if b, isBool := row["is_online"].(bool); isBool {
 			on = b
+		}
+		// 已上线剧集：subscribe_data.series_id 才是真实可播剧集 ID；item_id 是上线前的预约占位 ID（上线后会失效/提示已下线）。
+		var id string
+		if on {
+			id = nz(str(sd["series_id"]), str(row["item_id"]))
+		} else {
+			id = nz(str(row["item_id"]), str(sd["series_id"]))
+		}
+		if !digits.MatchString(id) {
+			continue
 		}
 		t := int64(num(row["expected_publish_time"]))
 		if t == 0 {

@@ -1,8 +1,8 @@
 from pathlib import Path
 import subprocess,zipfile,sys,os,json,tempfile,re
 root=Path(__file__).resolve().parent
-version_code=int(os.environ.get('LVGUO_VERSION_CODE','2004'))
-version_name=os.environ.get('LVGUO_VERSION_NAME','2.0.4')
+version_code=int(os.environ.get('LVGUO_VERSION_CODE','2005'))
+version_name=os.environ.get('LVGUO_VERSION_NAME','2.0.5')
 application_id=os.environ.get('LVGUO_APPLICATION_ID','ink.pengfei.lvguo')
 manifest_source=Path(os.environ.get('LVGUO_MANIFEST',str(root/'AndroidManifest.xml')))
 if not manifest_source.is_absolute():manifest_source=root/manifest_source

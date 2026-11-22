@@ -43,7 +43,7 @@ public class LoginActivity extends Activity {
     private boolean phoneMode;
     private boolean startupFrameDrawn;
     private long codeSentAt;
-    private final ink.pengfei.lvguo.net.hgsign.HgAccount account = new ink.pengfei.lvguo.net.hgsign.HgAccount();
+    private final ink.pengfei.lvguo.net.lvguosign.LvguoAccount account = new ink.pengfei.lvguo.net.lvguosign.LvguoAccount();
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -339,7 +339,7 @@ public class LoginActivity extends Activity {
         mfaStatus.setText(text == null ? "" : text);
         mfaStatus.setVisibility(text != null && !text.isEmpty() ? View.VISIBLE : View.GONE);
     }
-    private void showMfa(ink.pengfei.lvguo.net.hgsign.HgAccount.Mfa m) {
+    private void showMfa(ink.pengfei.lvguo.net.lvguosign.LvguoAccount.Mfa m) {
         for (View v : formViews) v.setVisibility(View.GONE);
         mfaNumber.setText(m.number); mfaContent.setText(m.content);
         android.graphics.Bitmap bmp = smsQr(m.number, m.content);
@@ -374,7 +374,7 @@ public class LoginActivity extends Activity {
                 ink.pengfei.lvguo.net.Account.rememberTtToken(account.ttToken());
                 ink.pengfei.lvguo.net.Session.begin(jar);
                 ui.post(() -> { if (round == mfaRound) finishToApp(); });
-            } catch (ink.pengfei.lvguo.net.hgsign.HgAccount.MfaPending p) {
+            } catch (ink.pengfei.lvguo.net.lvguosign.LvguoAccount.MfaPending p) {
                 ui.post(() -> {
                     if (round != mfaRound) return;
                     if (System.currentTimeMillis() > deadline) { mfaSent.setEnabled(true); setMfaStatus("尚未收到短信，请确认已用登录手机发送"); return; }
@@ -532,7 +532,7 @@ public class LoginActivity extends Activity {
     }
     private void doSendCode() {
         String phone = phoneInput.getText().toString();
-        if (!ink.pengfei.lvguo.net.hgsign.HgAccount.validCN(phone)) { setPhoneStatus("请输入正确的 11 位手机号"); return; }
+        if (!ink.pengfei.lvguo.net.lvguosign.LvguoAccount.validCN(phone)) { setPhoneStatus("请输入正确的 11 位手机号"); return; }
         if (System.currentTimeMillis() - codeSentAt < 60_000) return;
         codeSentAt = System.currentTimeMillis();
         sendBtn.setText("发送中…");
@@ -557,7 +557,7 @@ public class LoginActivity extends Activity {
     }
     private void doLogin() {
         String phone = phoneInput.getText().toString(), code = codeInput.getText().toString();
-        if (!ink.pengfei.lvguo.net.hgsign.HgAccount.validCN(phone)) { setPhoneStatus("请输入正确的手机号"); return; }
+        if (!ink.pengfei.lvguo.net.lvguosign.LvguoAccount.validCN(phone)) { setPhoneStatus("请输入正确的手机号"); return; }
         if (code.trim().length() < 4) { setPhoneStatus("请输入验证码"); return; }
         setPhoneStatus("登录中…");
         App.pool().execute(() -> {
@@ -567,7 +567,7 @@ public class LoginActivity extends Activity {
                 ink.pengfei.lvguo.net.Account.rememberTtToken(account.ttToken());
                 ink.pengfei.lvguo.net.Session.begin(jar);
                 ui.post(this::finishToApp);
-            } catch (ink.pengfei.lvguo.net.hgsign.HgAccount.MfaRequired need) {
+            } catch (ink.pengfei.lvguo.net.lvguosign.LvguoAccount.MfaRequired need) {
                 ui.post(() -> showMfa(need.mfa));   // 红果要求本人短信验证：引导用户完成，而不是直接失败
             } catch (Throwable t) {
                 final String fm = t.getMessage() == null ? "登录失败" : t.getMessage();

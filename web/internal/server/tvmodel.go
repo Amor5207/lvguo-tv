@@ -53,8 +53,9 @@ func (s *Server) tvModel(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		rows = append(rows, map[string]any{
-			"main_url":   g.MainURL,
-			"backup_url": g.BackupURL,
+			"main_url":        g.MainURL,
+			"backup_url":      g.BackupURL,
+			"backup_url_list": g.BackupURLs,
 			"video_meta": map[string]any{
 				"definition": g.Definition,
 				"codec_type": g.Codec,

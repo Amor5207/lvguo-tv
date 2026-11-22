@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Ported from hongguoTV kotlin-v0.1.26 PlaybackDeviceSession + DeviceRegister.
-package hg
+package lvguo
 
 import (
 	"bytes"

@@ -21,6 +21,7 @@ public final class Session {
     private Session() {}
 
     private static final String KEY_COOKIES = "acct_cookies", KEY_PROFILE = "acct_profile";
+    private static final String KEYSTORE_ALIAS = "lvguo_session_aes_v1", ENC_PREFIX = "enc:v1:";
     private static Map<String, String> jar;
     private static Profile profile;
     private static volatile long generation;
@@ -58,8 +59,12 @@ public final class Session {
         if (jar != null) return jar;
         jar = new LinkedHashMap<>();
         try {
-            JSONObject o = new JSONObject(App.prefs().getString(KEY_COOKIES, "{}"));
+            String stored = App.prefs().getString(KEY_COOKIES, "{}");
+            boolean wasPlaintext = stored != null && !stored.isEmpty() && !stored.startsWith(ENC_PREFIX) && !"{}".equals(stored);
+            String json = decryptCookies(stored);
+            JSONObject o = new JSONObject(json);
             for (Iterator<String> it = o.keys(); it.hasNext(); ) { String k = it.next(); jar.put(k, o.getString(k)); }
+            if (wasPlaintext && !jar.isEmpty()) save();
         } catch (Exception ignored) { }
         return jar;
     }
@@ -67,7 +72,58 @@ public final class Session {
     private static void save() {
         JSONObject o = new JSONObject();
         try { for (Map.Entry<String, String> e : jar().entrySet()) o.put(e.getKey(), e.getValue()); } catch (Exception ignored) { }
-        App.prefs().edit().putString(KEY_COOKIES, o.toString()).apply();
+        App.prefs().edit().putString(KEY_COOKIES, encryptCookies(o.toString())).apply();
+    }
+
+    private static javax.crypto.SecretKey sessionSecretKey() throws Exception {
+        java.security.KeyStore ks = java.security.KeyStore.getInstance("AndroidKeyStore");
+        ks.load(null);
+        if (ks.containsAlias(KEYSTORE_ALIAS)) {
+            java.security.Key k = ks.getKey(KEYSTORE_ALIAS, null);
+            if (k instanceof javax.crypto.SecretKey) return (javax.crypto.SecretKey) k;
+        }
+        javax.crypto.KeyGenerator kg = javax.crypto.KeyGenerator.getInstance(
+                android.security.keystore.KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+        kg.init(new android.security.keystore.KeyGenParameterSpec.Builder(
+                KEYSTORE_ALIAS,
+                android.security.keystore.KeyProperties.PURPOSE_ENCRYPT | android.security.keystore.KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build());
+        return kg.generateKey();
+    }
+
+    private static String encryptCookies(String plain) {
+        if (plain == null || plain.isEmpty() || "{}".equals(plain)) return "{}";
+        try {
+            javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, sessionSecretKey());
+            byte[] iv = cipher.getIV();
+            byte[] ct = cipher.doFinal(plain.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            byte[] out = new byte[iv.length + ct.length];
+            System.arraycopy(iv, 0, out, 0, iv.length);
+            System.arraycopy(ct, 0, out, iv.length, ct.length);
+            return ENC_PREFIX + android.util.Base64.encodeToString(out, android.util.Base64.NO_WRAP);
+        } catch (Throwable ignored) {
+            // 部分老电视 ROM 的 KeyStore 实现可能不可用，降级回明文而不影响登录。
+            return plain;
+        }
+    }
+
+    private static String decryptCookies(String stored) {
+        if (stored == null || stored.isEmpty()) return "{}";
+        if (!stored.startsWith(ENC_PREFIX)) return stored;
+        try {
+            byte[] raw = android.util.Base64.decode(stored.substring(ENC_PREFIX.length()), android.util.Base64.NO_WRAP);
+            if (raw.length <= 12) return "{}";
+            javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, sessionSecretKey(), new javax.crypto.spec.GCMParameterSpec(128, raw, 0, 12));
+            byte[] plain = cipher.doFinal(raw, 12, raw.length - 12);
+            return new String(plain, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Throwable ignored) {
+            return "{}";
+        }
     }
 
     public static synchronized boolean loggedIn() {
