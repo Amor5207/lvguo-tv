@@ -97,7 +97,7 @@ func requestLegacy(ctx context.Context, vid string, cfg PlaybackRouteConfig, d m
 	if endpoint == "" {
 		endpoint = legacyMobileEndpoint
 	}
-	payload := fmt.Sprintf(`{"biz_param":{"detail_page_version":0,"device_level":%d,"disable_digg_stat":false,"disable_video_relate_book":false,"need_all_video_definition":%t,"need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":%d},"mixed_video_id_map":{"1004":["%s"]},"video_id":"%s","content_type":1}`, cfg.DeviceLevel, *cfg.NeedAll, cfg.VideoPlatform, vid, vid)
+	payload := fmt.Sprintf(`{"biz_param":{"detail_page_version":0,"device_level":%d,"disable_digg_stat":false,"disable_video_relate_book":false,"need_all_video_definition":%t,"need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":%d},"dr_scene":"player","mixed_video_id_map":{"1004":["%s"]},"video_id":"%s","content_type":1}`, cfg.DeviceLevel, *cfg.NeedAll, cfg.VideoPlatform, vid, vid)
 	var b bytes.Buffer
 	z := gzip.NewWriter(&b)
 	if _, err := z.Write([]byte(payload)); err != nil {
@@ -107,9 +107,17 @@ func requestLegacy(ctx context.Context, vid string, cfg PlaybackRouteConfig, d m
 		return nil, err
 	}
 	p := sign.Params{
-		{K: "aid", V: "8662"}, {K: "app_name", V: "novelread"}, {K: "version_code", V: "74332"}, {K: "version_name", V: "7.4.3.32"},
-		{K: "channel", V: "vivo_8662_64"}, {K: "device_platform", V: "android"}, {K: "device_type", V: "PGT-AN10"}, {K: "os_version", V: "12"},
-		{K: "update_version_code", V: "74332"}, {K: "iid", V: d.installID}, {K: "cdid", V: d.cdid}, {K: "device_id", V: d.deviceID}, {K: "_rticket", V: "0"},
+		{K: "device_platform", V: "android"}, {K: "os", V: "android"}, {K: "ssmix", V: "a"},
+		{K: "_rticket", V: "0"},
+		{K: "cdid", V: d.cdid}, {K: "channel", V: "vivo_8662_64"},
+		{K: "aid", V: "8662"}, {K: "app_name", V: "novelread"},
+		{K: "version_code", V: "74332"}, {K: "version_name", V: "7.4.3.32"},
+		{K: "manifest_version_code", V: "74332"}, {K: "update_version_code", V: "74332"},
+		{K: "resolution", V: "1920*1080"}, {K: "dpi", V: "280"},
+		{K: "device_type", V: "PGT-AN10"}, {K: "device_brand", V: "HONOR"},
+		{K: "language", V: "zh"}, {K: "os_api", V: "31"}, {K: "os_version", V: "12"},
+		{K: "ac", V: "wifi"}, {K: "host_abi", V: "arm64-v8a"},
+		{K: "iid", V: d.installID}, {K: "device_id", V: d.deviceID},
 	}
 	signer, err := sign.NewPlaybackSigner(d.deviceID, "7.4.3.32")
 	if err != nil {

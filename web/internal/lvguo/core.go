@@ -308,7 +308,19 @@ func registerDevice(prev *Device) (Device, error) {
 			region = strings.TrimPrefix(strings.SplitN(c, ";", 2)[0], "store-region=")
 		}
 	}
+	activateRegisteredDevice(dev, iid)
 	return Device{ID: dev, IID: iid, CDID: cdid, OpenUDID: openudid, ClientUDID: clientudid, Region: region}, nil
+}
+
+func activateRegisteredDevice(did, iid string) {
+	if did == "" || iid == "" {
+		return
+	}
+	u := "https://log5-applog-lf.fqnovel.com/service/2/app_alert_check/?aid=8662&app_name=novelread&channel=update_64" +
+		"&device_id=" + did + "&iid=" + iid +
+		"&device_platform=android&os=android&version_code=71932&version_name=7.1.9.32" +
+		"&_rticket=" + strconv.FormatInt(time.Now().UnixMilli(), 10)
+	_, _ = doRequest("GET", u, [][2]string{{"User-Agent", sign.AppUA}}, nil)
 }
 
 var playbackCookieNames = []string{"install_id", "ttreq", "store-region", "store-region-src"}

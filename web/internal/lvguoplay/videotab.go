@@ -39,12 +39,16 @@ func PlayVideoTab(ctx context.Context, vid string) (map[string]any, error) {
 		return nil, err
 	}
 	p := sign.Params{
+		{K: "device_platform", V: "android"}, {K: "os", V: "android"}, {K: "ssmix", V: "a"},
+		{K: "cdid", V: d.cdid}, {K: "channel", V: "vivo_8662_64"},
 		{K: "aid", V: "8662"}, {K: "app_name", V: "novelread"},
 		{K: "version_code", V: "74332"}, {K: "version_name", V: "7.4.3.32"},
-		{K: "channel", V: "vivo_8662_64"}, {K: "device_platform", V: "android"},
-		{K: "device_type", V: "PGT-AN10"}, {K: "os_version", V: "12"},
-		{K: "update_version_code", V: "74332"},
-		{K: "iid", V: d.installID}, {K: "cdid", V: d.cdid}, {K: "device_id", V: d.deviceID},
+		{K: "manifest_version_code", V: "74332"}, {K: "update_version_code", V: "74332"},
+		{K: "resolution", V: "1920*1080"}, {K: "dpi", V: "280"},
+		{K: "device_type", V: "PGT-AN10"}, {K: "device_brand", V: "HONOR"},
+		{K: "language", V: "zh"}, {K: "os_api", V: "31"}, {K: "os_version", V: "12"},
+		{K: "ac", V: "wifi"}, {K: "host_abi", V: "arm64-v8a"},
+		{K: "iid", V: d.installID}, {K: "device_id", V: d.deviceID},
 		{K: "video_id", V: vid}, {K: "video_id_type", V: "0"},
 		{K: "device_level", V: "1"}, {K: "need_all_video_definition", V: "1"},
 		{K: "need_mp4_align", V: "0"}, {K: "use_os_player", V: "0"},

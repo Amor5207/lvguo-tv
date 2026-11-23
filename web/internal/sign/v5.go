@@ -181,6 +181,17 @@ func encryptV5(a *aesV3, source, ivb []byte) ([]byte, error) {
 	}
 	return cat([]byte{key[len(key)-1]}, out), nil
 }
+func medusaV5Token(nonce string) string {
+	// Upstream tt_agw requires a 25-char URL-safe sec_device_token in Medusa field 16.
+	if len(nonce) == 25 && nonce[0] == 'A' {
+		return nonce
+	}
+	if len(nonce) >= 24 {
+		return "A" + nonce[:24]
+	}
+	return "A" + nonce + strings.Repeat("A", 24-len(nonce))
+}
+
 func medusaV5(rawURL string, body []byte, ts uint32, s *PlaybackSigner, who map[string]string, random func() float64) (string, error) {
 	bodyMD5 := make([]byte, 16)
 	if body != nil {
@@ -198,12 +209,13 @@ func medusaV5(rawURL string, body []byte, ts uint32, s *PlaybackSigner, who map[
 	flags := make([]byte, 8)
 	version := who["version_name"]
 	did := who["device_id"]
-	device := new(proto).sint(1, 1).sint(2, 2).str(3, "8662").str(4, did).str(5, s.processNonce).str(6, "!noperm!").str(12, "Asia/Shanghai,8").str(13, "zh_CN").str(22, who["os_version"]).sint(25, s.processStarted).str(30, who["device_type"]).str(31, "HONOR").str(32, who["device_type"]).str(34, "HONOR").get()
+	secToken := medusaV5Token(s.processNonce)
+	device := new(proto).sint(1, 1).sint(2, 2).str(3, "8662").str(4, did).str(5, secToken).str(6, "!noperm!").str(12, "Asia/Shanghai,8").str(13, "zh_CN").str(22, who["os_version"]).sint(25, s.processStarted).str(30, who["device_type"]).str(31, "HONOR").str(32, who["device_type"]).str(34, "HONOR").get()
 	env := new(proto).str(6, "v04.10.03.04-bugfix").str(8, who["channel"]).bytes(12, device).str(14, version).get()
 	nested := new(proto).sint(1, 1).sint(2, 1).sint(3, 1).sint(5, 1).get()
 	magic := Unhex("2d4b4fca49750d433fb5ae2c226dcc56")
 	key := Unhex("b23c2a470a20d105dc3f8c4438f8272ed46d6c89ffdcdedd5108698d26e9489d")
-	msg := new(proto).bytes(1, magic).sint(2, 5).sint(3, int64(u32rand(random))).str(4, "8662").str(5, did).str(6, "646637794").str(7, version).str(8, "v04.10.03-ml-android").sint(9, 0x040a0300).bytes(10, flags).sint(12, int64(ts)).bytes(13, f13).bytes(14, head(qh, 6)).bytes(15, nested).sint(17, int64(ts)).str(20, "none").sint(21, 377).bytes(23, env).str(24, `{"cmr":16777216,"cmr2":16777216,"un_h":11,"vpn":0,"kd":0,"dyn":"","do":1,"tk":true}`).get()
+	msg := new(proto).bytes(1, magic).sint(2, 5).sint(3, int64(u32rand(random))).str(4, "8662").str(5, did).str(6, "646637794").str(7, version).str(8, "v04.10.03-ml-android").sint(9, 0x040a0300).bytes(10, flags).sint(12, int64(ts)).bytes(13, f13).bytes(14, head(qh, 6)).bytes(15, nested).str(16, secToken).sint(17, int64(ts)).str(20, "none").sint(21, 377).bytes(23, env).str(24, `{"cmr":16777216,"cmr2":16777216,"un_h":11,"vpn":0,"kd":0,"dyn":"","do":1,"tk":true}`).get()
 	nonce := u32rand(random)
 	hash := SM3(cat(key, le32(nonce), key))
 	high := (nonce >> 16) & 255

@@ -17,19 +17,54 @@ import javax.crypto.spec.SecretKeySpec
 /** ABI v1: create an upstream request and normalize its response. */
 class PlaybackModule {
     private val signer = Signer(mobileV5 = true)
+    private val activatedDevices = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    /** 首次播放前触发 app_alert_check 激活匿名 device_id，使旧版 APK 持久化的设备也能通过热更新自愈。 */
+    private fun ensureActivated(dev: JSONObject) {
+        val did = dev.optString("device_id", "").trim()
+        val iid = dev.optString("iid", "").trim()
+        if (did.length < 10 || iid.length < 10 || activatedDevices.contains(did)) return
+        try {
+            val u = URL(
+                "https://log5-applog-lf.fqnovel.com/service/2/app_alert_check/" +
+                    "?aid=8662&app_name=novelread&channel=update_64&device_id=$did&iid=$iid" +
+                    "&device_platform=android&os=android&version_code=73932&version_name=7.3.9.32" +
+                    "&_rticket=${System.currentTimeMillis()}"
+            )
+            val conn = u.openConnection() as HttpURLConnection
+            conn.connectTimeout = 3000
+            conn.readTimeout = 3000
+            conn.setRequestProperty("User-Agent", "com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)")
+            try {
+                if (conn.responseCode == 200) {
+                    conn.inputStream.use { it.readBytes() }
+                    activatedDevices.add(did)
+                }
+            } finally {
+                conn.disconnect()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
     // 2026-11-20 起上游对旧 V5 POST 一律回 200 空 body（dr_scene 已移入请求体）；
     // video_tab 空 body 签名 GET 是同一上游当前的可用播放路线。
     fun prepare(vid: String, identity: String): String {
         require(vid.matches(Regex("[0-9]{6,24}")))
         val dev = JSONObject(identity)
+        ensureActivated(dev)
         val now = System.currentTimeMillis()
         val params = linkedMapOf(
+            "device_platform" to "android", "os" to "android", "ssmix" to "a",
+            "cdid" to dev.getString("cdid"), "channel" to "vivo_8662_64",
             "aid" to "8662", "app_name" to "novelread",
             "version_code" to "74332", "version_name" to "7.4.3.32",
-            "channel" to "vivo_8662_64", "device_platform" to "android",
-            "device_type" to "PGT-AN10", "os_version" to "12",
-            "update_version_code" to "74332",
-            "iid" to dev.getString("iid"), "cdid" to dev.getString("cdid"), "device_id" to dev.getString("device_id"),
+            "manifest_version_code" to "74332", "update_version_code" to "74332",
+            "resolution" to "1920*1080", "dpi" to "280",
+            "device_type" to "PGT-AN10", "device_brand" to "HONOR",
+            "language" to "zh", "os_api" to "31", "os_version" to "12",
+            "ac" to "wifi", "host_abi" to "arm64-v8a",
+            "iid" to dev.getString("iid"), "device_id" to dev.getString("device_id"),
             "video_id" to vid, "video_id_type" to "0", "device_level" to "1",
             "need_all_video_definition" to "1", "need_mp4_align" to "0",
             "use_os_player" to "0", "video_platform" to "1024",
@@ -47,22 +82,27 @@ class PlaybackModule {
         if (route == "videotab") return prepare(vid, identity)
         require(vid.matches(Regex("[0-9]{6,24}")))
         val dev = JSONObject(identity)
+        ensureActivated(dev)
         val now = System.currentTimeMillis()
         val scene = if (route == "legacy") "player" else drScene.trim().ifEmpty { "default" }
         val safeScene = if (scene.matches(Regex("[A-Za-z0-9_-]{1,32}"))) scene else "default"
         val endpoint = "https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/$safeScene/v1/"
-        val payload = "{\"biz_param\":{\"detail_page_version\":0,\"device_level\":1,\"disable_digg_stat\":false,\"disable_video_relate_book\":false,\"need_all_video_definition\":true,\"need_mp4_align\":false,\"use_os_player\":false,\"use_server_dns\":false,\"video_platform\":1024},\"mixed_video_id_map\":{\"1004\":[\"$vid\"]},\"video_id\":\"$vid\",\"content_type\":1}"
+        val payload = "{\"biz_param\":{\"detail_page_version\":0,\"device_level\":1,\"disable_digg_stat\":false,\"disable_video_relate_book\":false,\"need_all_video_definition\":true,\"need_mp4_align\":false,\"use_os_player\":false,\"use_server_dns\":false,\"video_platform\":1024},\"dr_scene\":\"$safeScene\",\"mixed_video_id_map\":{\"1004\":[\"$vid\"]},\"video_id\":\"$vid\",\"content_type\":1}"
         val gz = ByteArrayOutputStream().also { out ->
             GZIPOutputStream(out).use { it.write(payload.toByteArray(Charsets.UTF_8)) }
         }.toByteArray()
         val params = linkedMapOf(
+            "device_platform" to "android", "os" to "android", "ssmix" to "a",
+            "_rticket" to "0",
+            "cdid" to dev.getString("cdid"), "channel" to "vivo_8662_64",
             "aid" to "8662", "app_name" to "novelread",
             "version_code" to "74332", "version_name" to "7.4.3.32",
-            "channel" to "vivo_8662_64", "device_platform" to "android",
-            "device_type" to "PGT-AN10", "os_version" to "12",
-            "update_version_code" to "74332",
-            "iid" to dev.getString("iid"), "cdid" to dev.getString("cdid"), "device_id" to dev.getString("device_id"),
-            "_rticket" to "0",
+            "manifest_version_code" to "74332", "update_version_code" to "74332",
+            "resolution" to "1920*1080", "dpi" to "280",
+            "device_type" to "PGT-AN10", "device_brand" to "HONOR",
+            "language" to "zh", "os_api" to "31", "os_version" to "12",
+            "ac" to "wifi", "host_abi" to "arm64-v8a",
+            "iid" to dev.getString("iid"), "device_id" to dev.getString("device_id"),
         )
         val signed = signer.signPlayback(endpoint, params, gz, now)
         val headers = JSONObject(signed.headers)

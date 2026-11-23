@@ -368,14 +368,20 @@ internal class Signer(
         return (prefix + byteArrayOf(r.toByte(), (r shr 8).toByte(), 0, 1) + encrypted).base64()
     }
 
+    private fun secDeviceToken(): String {
+        if (processNonce.length == 25 && processNonce.startsWith("A")) return processNonce
+        return "A" + processNonce.take(24).padEnd(24, 'A')
+    }
+
     private fun medusaV5(url: String, body: ByteArray?, ts: Int, who: Map<String, String>): String {
         val query = sm3(url.substringAfter('?').toByteArray(Charsets.UTF_8))
         val f13 = hashF13(query, body?.let { digest("MD5", it) } ?: ByteArray(16), ts)
         val flags = ByteArray(8)
         val version = who.getValue("version_name")
+        val secToken = secDeviceToken()
         val deviceInfo = proto(
             f(1, 1, "sint"), f(2, 2, "sint"), f(3, "8662"), f(4, who.getValue("device_id")),
-            f(5, processNonce), f(6, "!noperm!"), f(12, "Asia/Shanghai,8"), f(13, "zh_CN"),
+            f(5, secToken), f(6, "!noperm!"), f(12, "Asia/Shanghai,8"), f(13, "zh_CN"),
             f(22, who.getValue("os_version")), f(25, processStarted, "sint"),
             f(30, who.getValue("device_type")), f(31, "HONOR"),
             f(32, who.getValue("device_type")), f(34, "HONOR"),
@@ -388,6 +394,7 @@ internal class Signer(
             f(7, version), f(8, "v04.10.03-ml-android"), f(9, 0x040a0300, "sint"),
             f(10, flags), f(12, ts, "sint"), f(13, f13), f(14, query.copyOf(6)),
             f(15, proto(f(1, 1, "sint"), f(2, 1, "sint"), f(3, 1, "sint"), f(5, 1, "sint"))),
+            f(16, secToken),
             f(17, ts, "sint"), f(20, "none"), f(21, 377, "sint"), f(23, env),
             f(24, """{"cmr":16777216,"cmr2":16777216,"un_h":11,"vpn":0,"kd":0,"dyn":"","do":1,"tk":true}"""),
         )

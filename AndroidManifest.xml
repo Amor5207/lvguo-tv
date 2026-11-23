@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="ink.pengfei.lvguo" android:versionCode="2006" android:versionName="2.0.6">
+    package="ink.pengfei.lvguo" android:versionCode="2007" android:versionName="2.0.7">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />

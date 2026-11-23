@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 )
@@ -265,7 +266,49 @@ func (c *passportClient) registerDeviceProfile(ctx context.Context, singlePlayba
 		}
 	}
 	c.session.Cookies["install_id"] = iid
+	c.activateDevice(ctx, did, iid, singlePlayback)
 	return nil
+}
+
+// activateDevice calls /service/2/app_alert_check/ so upstream tt_agw marks the
+// freshly registered device_id as active for video_model playback requests.
+func (c *passportClient) activateDevice(ctx context.Context, did, iid string, singlePlayback bool) {
+	if c == nil || c.http == nil || c.deviceBase == "" || !validID(did) || !validID(iid) {
+		return
+	}
+	actCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	verCode, verName, channel := "74132", "7.4.1.32", "vivo_8662_64"
+	if singlePlayback {
+		verCode, verName, channel = "73932", "7.3.9.32", "xiaomi_8662_64"
+	}
+	q := url.Values{
+		"aid":             {"8662"},
+		"app_name":        {"novelread"},
+		"channel":         {channel},
+		"device_id":       {did},
+		"iid":             {iid},
+		"device_platform": {"android"},
+		"os":              {"android"},
+		"version_code":    {verCode},
+		"version_name":    {verName},
+		"_rticket":        {strconv.FormatInt(time.Now().UnixMilli(), 10)},
+	}
+	base := c.deviceBase
+	if base == miniReelSingleDeviceBase {
+		base = "https://log5-applog-lf.fqnovel.com"
+	}
+	req, err := http.NewRequestWithContext(actCtx, http.MethodGet, base+"/service/2/app_alert_check/?"+q.Encode(), nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("User-Agent", miniReelSingleUA)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	_ = resp.Body.Close()
 }
 
 type passportHTTPError struct{ Status, RetryAfter int }

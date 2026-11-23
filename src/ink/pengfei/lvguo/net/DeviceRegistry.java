@@ -49,7 +49,21 @@ final class DeviceRegistry {
         String dev = data.optString("device_id_str", data.optString("device_id"));
         String ins = data.optString("install_id_str", data.optString("install_id"));
         if (dev.isEmpty() || ins.isEmpty() || "0".equals(dev)) throw new IllegalStateException("设备注册被拒绝");
+        activateDevice(dev, ins);
         return new String[]{dev, ins};
+    }
+
+    private static void activateDevice(String dev, String ins) {
+        try {
+            String u = "https://log5-applog-lf.fqnovel.com/service/2/app_alert_check/"
+                    + "?aid=8662&app_name=novelread&channel=update_64&device_id=" + dev
+                    + "&iid=" + ins + "&device_platform=android&os=android"
+                    + "&version_code=73932&version_name=7.3.9.32&_rticket=" + System.currentTimeMillis();
+            Map<String, String> h = new LinkedHashMap<>();
+            h.put("User-Agent", Signer.APP_UA);
+            Account.request(u, h, null, null);
+        } catch (Exception ignored) {
+        }
     }
 
     private static JSONObject payload() throws Exception {
