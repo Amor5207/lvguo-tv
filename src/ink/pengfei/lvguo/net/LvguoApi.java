@@ -60,6 +60,48 @@ public final class LvguoApi {
         return q;
     }
 
+    /**
+     * 按远端 playback-config.json 的 apis 策略调用内容接口（支持动态配置路径、方法、签名模式、query/body 模板）。
+     * 默认全部走签名请求，消除免签旁路风险。
+     */
+    public static JSONObject callDynamic(String apiName, Map<String, String> extraQuery, JSONObject extraBody) throws Exception {
+        PlaybackConfig.ApiEndpoint cfg = PlaybackConfig.get().api(apiName);
+        if (cfg == null) throw new java.io.IOException("未配置接口策略: " + apiName);
+        Map<String, String> q = new LinkedHashMap<>();
+        if (extraQuery != null) q.putAll(extraQuery);
+        if (cfg.query != null) q.putAll(cfg.query);
+        JSONObject mergedBody = mergeBody(cfg.bodyJson, extraBody);
+        if ("none".equalsIgnoreCase(cfg.sign)) {
+            return call(cfg.path, "POST".equalsIgnoreCase(cfg.method) ? mergedBody : null, q);
+        }
+        String cookie = Session.loggedIn() ? Session.cookieHeader() : null;
+        String text = ink.pengfei.lvguo.net.lvguosign.LvguoPlayback.requestSigned(
+                cfg.method, cfg.host, cfg.backupHost, cfg.path, q,
+                ("POST".equalsIgnoreCase(cfg.method) && mergedBody != null) ? mergedBody.toString() : null,
+                cookie);
+        return new JSONObject(text);
+    }
+
+    private static JSONObject mergeBody(String baseJson, JSONObject extra) throws Exception {
+        if ((baseJson == null || baseJson.isEmpty()) && extra == null) return null;
+        JSONObject out = (baseJson == null || baseJson.isEmpty()) ? new JSONObject() : new JSONObject(baseJson);
+        if (extra != null) mergeJsonInto(out, extra);
+        return out;
+    }
+
+    private static void mergeJsonInto(JSONObject target, JSONObject src) throws Exception {
+        java.util.Iterator<String> it = src.keys();
+        while (it.hasNext()) {
+            String k = it.next();
+            Object v = src.get(k);
+            if (v instanceof JSONObject && target.optJSONObject(k) != null) {
+                mergeJsonInto(target.getJSONObject(k), (JSONObject) v);
+            } else {
+                target.put(k, v);
+            }
+        }
+    }
+
     public static JSONObject call(String path, JSONObject body, Map<String, String> extra)
             throws Exception {
         Exception error=null;JSONObject last=null;

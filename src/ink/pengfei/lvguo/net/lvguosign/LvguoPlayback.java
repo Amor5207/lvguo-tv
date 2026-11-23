@@ -289,10 +289,14 @@ public final class LvguoPlayback {
     // Narrow bridge shared with authenticated playback modules.
     private static Device moduleDevice;
     private static long moduleRefreshedAt;
-    public static synchronized String moduleIdentity() throws Exception {
+    private static synchronized Device ensureModuleDevice() throws Exception {
         if (moduleDevice == null) moduleDevice = registerDevice();
+        return moduleDevice;
+    }
+    public static synchronized String moduleIdentity() throws Exception {
+        Device d = ensureModuleDevice();
         org.json.JSONObject out = new org.json.JSONObject();
-        out.put("device_id", moduleDevice.deviceID); out.put("iid", moduleDevice.installID); out.put("cdid", moduleDevice.cdid);
+        out.put("device_id", d.deviceID); out.put("iid", d.installID); out.put("cdid", d.cdid);
         return out.toString();
     }
     public static synchronized void rotateModuleIdentity() {
@@ -302,6 +306,77 @@ public final class LvguoPlayback {
         moduleDevice = null;
     }
     public static byte[] moduleSm3(byte[] data) { return LvguoSign.sm3(data); }
+
+    /** 使用复用匿名设备发送签名 GET/POST 请求（供所有内容接口按动态策略统一调度）。 */
+    public static String requestSigned(String method, String primaryHost, String backupHost, String path,
+                                       Map<String, String> extraQuery, String jsonBody, String extraCookie) throws Exception {
+        String m = (method == null || method.isEmpty()) ? (jsonBody == null ? "GET" : "POST") : method.toUpperCase(Locale.ROOT);
+        byte[] body = ("POST".equals(m) && jsonBody != null) ? jsonBody.getBytes(StandardCharsets.UTF_8) : null;
+        String h1 = (primaryHost == null || primaryHost.isEmpty()) ? "api5-normal-sinfonlinea.fqnovel.com" : primaryHost;
+        String h2 = (backupHost == null || backupHost.isEmpty()) ? "api3-normal-sinfonlinea.fqnovel.com" : backupHost;
+        String[] hosts = h1.equals(h2) ? new String[]{h1} : new String[]{h1, h2};
+        Exception lastErr = null;
+        for (int round = 0; round < 2; round++) {
+            Device d = ensureModuleDevice();
+            boolean gotEmpty200 = false;
+            for (String host : hosts) {
+                HttpURLConnection c = null;
+                try {
+                    long stamp = System.currentTimeMillis();
+                    Map<String, String> q = singleQuery(d);
+                    if (extraQuery != null) {
+                        for (Map.Entry<String, String> e : extraQuery.entrySet()) {
+                            q.put(e.getKey(), e.getValue() == null ? "" : e.getValue());
+                        }
+                    }
+                    Signed s = signPlayback(q, body, stamp, d.deviceID);
+                    c = (HttpURLConnection) new URL("https://" + host + path + "?" + s.rawQuery).openConnection();
+                    c.setRequestMethod(m);
+                    c.setConnectTimeout(10000);
+                    c.setReadTimeout(12000);
+                    c.setInstanceFollowRedirects(false);
+                    for (Map.Entry<String, String> e : s.headers.entrySet()) c.setRequestProperty(e.getKey(), e.getValue());
+                    c.setRequestProperty("User-Agent", SINGLE_UA);
+                    c.setRequestProperty("Accept", "application/json");
+                    String ck = cookieHeader(d);
+                    if (extraCookie != null && !extraCookie.isEmpty()) ck = ck.isEmpty() ? extraCookie : ck + "; " + extraCookie;
+                    if (!ck.isEmpty()) c.setRequestProperty("Cookie", ck);
+                    c.setRequestProperty("X-Reading-Request", stamp + "-" + (randU32() & 0x7fffffff));
+                    if (body != null) {
+                        c.setDoOutput(true);
+                        c.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                        OutputStream os = c.getOutputStream();
+                        os.write(body);
+                        os.close();
+                    }
+                    int code = c.getResponseCode();
+                    InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
+                    byte[] resp = readAll(in);
+                    if (code >= 200 && code < 300) {
+                        if (resp.length > 0) return new String(resp, StandardCharsets.UTF_8);
+                        gotEmpty200 = true;
+                        lastErr = new RuntimeException("接口返回空响应");
+                    } else {
+                        lastErr = new RuntimeException("接口 HTTP " + code);
+                    }
+                } catch (Exception e) {
+                    lastErr = e;
+                } finally {
+                    if (c != null) c.disconnect();
+                }
+            }
+            if (gotEmpty200 && round == 0) {
+                rotateModuleIdentity();
+                continue;
+            }
+            break;
+        }
+        throw lastErr != null ? lastErr : new RuntimeException("请求未完成");
+    }
+
+    public static String postSigned(String path, String jsonBody) throws Exception {
+        return requestSigned("POST", null, null, path, null, jsonBody, null);
+    }
 
     /** 取 vid 的 video_model 原始 JSON。 */
     public static String play(String vid) throws Exception {

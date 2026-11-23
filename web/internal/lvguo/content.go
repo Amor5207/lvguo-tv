@@ -26,10 +26,12 @@ import (
 )
 
 const (
-	PathCellChange = "/reading/bookapi/bookmall/cell/change/v1/"
-	PathBookmall   = "/reading/bookapi/bookmall/tab/v1/"
-	PathAlbum      = "/novel/player/album_detail/v1/"
-	DefaultCell    = "7470092475068071998"
+	PathCellChange       = "/reading/bookapi/bookmall/cell/change/v1/"
+	PathBookmall         = "/reading/bookapi/bookmall/tab/v1/"
+	PathAlbum            = "/novel/player/album_detail/v1/"
+	PathVideoDetail      = "/novel/player/video_detail/v1/"
+	PathMultiVideoDetail = "/novel/player/multi_video_detail/player/v1"
+	DefaultCell          = "7470092475068071998"
 
 	BoardHot       = "ranklist_hot_play_sc"
 	BoardRecommend = "ranklist_hot_sc"
@@ -221,10 +223,10 @@ func (c *Content) page(cookie, typ, board, filter string, offset int, session st
 	if session == "" {
 		session = uuid()
 	}
-	m, err := c.C.Call(cookie, PathCellChange, nil, sign.Params{
+	m, err := c.callDynamicAPI(cookie, "rank", sign.Params{
 		{K: "cell_id", V: DefaultCell}, {K: "tab_type", V: "26"}, {K: "client_req_type", V: "2"}, {K: "client_template", V: "2"},
 		{K: "screen_width_px", V: "1350"}, {K: "selected_items", V: typ}, {K: "sub_selected_items", V: board},
-		{K: "panel_selected_items", V: filter}, {K: "offset", V: strconv.Itoa(offset)}, {K: "session_uuid", V: session}})
+		{K: "panel_selected_items", V: filter}, {K: "offset", V: strconv.Itoa(offset)}, {K: "session_uuid", V: session}}, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -565,19 +567,139 @@ func (c *Content) CategoryPage(cookie, typ, board string, selected map[string]st
 
 // ------------------------------------------------------------ 详情
 
-func albumBody(id string, batch []string) map[string]any {
-	if batch == nil {
-		batch = []string{id}
+func mergeBodyMaps(base, override map[string]any) map[string]any {
+	if len(base) == 0 && len(override) == 0 {
+		return nil
 	}
-	ids := make([]json.Number, len(batch))
-	for i, s := range batch {
-		ids[i] = json.Number(s)
+	out := make(map[string]any, len(base)+len(override))
+	for k, v := range base {
+		if sub, ok := v.(map[string]any); ok {
+			out[k] = mergeBodyMaps(sub, nil)
+		} else {
+			out[k] = v
+		}
 	}
-	return map[string]any{
-		"album_id": id, "series_ids": ids, "need_video_detail_info": true,
-		"biz_param": map[string]any{"video_platform": 1024, "need_all_video_definition": true, "need_mp4_align": true,
-			"use_os_player": false, "device_level": DeviceLevelH265, "screen_width_px": "1350", "source": 7, "video_id_type": 1},
+	for k, v := range override {
+		if ovSub, ok := v.(map[string]any); ok {
+			if baseSub, bok := out[k].(map[string]any); bok {
+				out[k] = mergeBodyMaps(baseSub, ovSub)
+				continue
+			}
+		}
+		out[k] = v
 	}
+	return out
+}
+
+// callDynamicAPI 按远端 playback-config.json 的 apis 策略调用内容接口（支持动态调整路径、方法、签名档位、query/body 模板）。
+func (c *Content) callDynamicAPI(cookie, name string, extraQuery sign.Params, extraBody map[string]any) (map[string]any, error) {
+	cfg := lvguoplay.API(name)
+	if cfg.Path == "" {
+		return nil, fmt.Errorf("未配置接口策略: %s", name)
+	}
+	method := strings.ToUpper(strings.TrimSpace(cfg.Method))
+	if method == "" {
+		if len(extraBody) > 0 || len(cfg.Body) > 0 {
+			method = "POST"
+		} else {
+			method = "GET"
+		}
+	}
+	signMode := strings.ToLower(strings.TrimSpace(cfg.Sign))
+	if signMode == "" {
+		signMode = "v5"
+	}
+
+	mergedQuery := make(sign.Params, 0, len(cfg.Query)+len(extraQuery))
+	for _, kv := range extraQuery {
+		mergedQuery = mergedQuery.Set(kv.K, kv.V)
+	}
+	for k, v := range cfg.Query {
+		mergedQuery = mergedQuery.Set(k, v)
+	}
+	mergedBody := mergeBodyMaps(cfg.Body, extraBody)
+
+	if signMode == "none" {
+		if method == "GET" {
+			return c.C.Call(cookie, cfg.Path, nil, mergedQuery)
+		}
+		return c.C.CallRetry(cookie, cfg.Path, mergedBody, mergedQuery)
+	}
+
+	dev, err := c.C.Devices.Get()
+	if err != nil {
+		return nil, err
+	}
+	signer, err := sign.NewPlaybackSigner(dev.ID, "7.4.3.32")
+	if err != nil {
+		return nil, err
+	}
+	var raw []byte
+	if method == "POST" && mergedBody != nil {
+		raw, err = json.Marshal(mergedBody)
+		if err != nil {
+			return nil, err
+		}
+	}
+	hosts := []string{cfg.Host}
+	if cfg.BackupHost != "" && cfg.BackupHost != cfg.Host {
+		hosts = append(hosts, cfg.BackupHost)
+	}
+	var last map[string]any
+	var lastStatus int
+	var lastErr error
+	for _, host := range hosts {
+		p := sign.Params{
+			{K: "aid", V: "8662"}, {K: "app_name", V: "novelread"}, {K: "version_code", V: "74332"}, {K: "version_name", V: "7.4.3.32"},
+			{K: "channel", V: "vivo_8662_64"}, {K: "device_platform", V: "android"}, {K: "device_type", V: "PGT-AN10"}, {K: "os_version", V: "12"},
+			{K: "update_version_code", V: "74332"}, {K: "iid", V: dev.IID}, {K: "cdid", V: dev.CDID}, {K: "device_id", V: dev.ID}, {K: "_rticket", V: "0"},
+		}
+		for _, kv := range mergedQuery {
+			p = p.Set(kv.K, kv.V)
+		}
+		signed, serr := signer.SignMobileV5("https://"+host+cfg.Path, p, raw, time.Now().UnixMilli(), nil)
+		if serr != nil {
+			lastErr = serr
+			continue
+		}
+		h := make([][2]string, 0, len(signed.Headers)+3)
+		h = append(h, [2]string{"User-Agent", "com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)"})
+		h = append(h, [2]string{"Accept", "application/json"})
+		for _, kv := range signed.Headers {
+			if raw == nil && (strings.EqualFold(kv[0], "Content-Type") || strings.EqualFold(kv[0], "x-ss-stub")) {
+				continue
+			}
+			h = append(h, kv)
+		}
+		if cookie != "" {
+			h = append(h, [2]string{"Cookie", cookie})
+		}
+		r, rerr := doRequest(method, signed.URL, h, raw)
+		if rerr != nil {
+			lastErr = rerr
+			continue
+		}
+		lastStatus = r.Status
+		m, jerr := r.JSON()
+		if jerr != nil {
+			lastErr = jerr
+			continue
+		}
+		last = m
+		if r.Status < 500 && num(m["code"]) != 101116 {
+			return m, nil
+		}
+	}
+	if last != nil {
+		return last, nil
+	}
+	if lastStatus == 200 {
+		return nil, errors.New("片源服务暂时拒绝了本站的请求（服务器出口被限流），请稍后再试")
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, errors.New("网络请求未完成")
 }
 
 // HistorySummaries resolves progress-only series in batches, without fetching
@@ -609,11 +731,14 @@ func (c *Content) HistorySummaries(cookie string, ids []string) map[string]Entry
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			m, err := c.C.CallRetry(cookie, PathAlbum, albumBody(batch[0], batch), nil)
+			m, err := c.callDynamicAPI(cookie, "detail_batch", nil, map[string]any{"series_id": strings.Join(batch, ",")})
 			if err != nil || int(num(m["code"])) != 0 {
 				return
 			}
-			data := obj(obj(m["data"])["video_detail_data"])
+			data := obj(m["data"])
+			if vdd := obj(data["video_detail_data"]); vdd != nil {
+				data = vdd
+			}
 			for _, id := range batch {
 				v := obj(obj(data[id])["video_data"])
 				if v == nil {
@@ -641,14 +766,21 @@ func (c *Content) Detail(cookie, id string) (*Detail, error) {
 	if v, ok := c.get("detail:" + id); ok {
 		return v.(*Detail), nil
 	}
-	m, err := c.C.CallRetry(cookie, PathAlbum, albumBody(id, nil), nil)
+	m, err := c.callDynamicAPI(cookie, "detail", nil, map[string]any{"series_id": id})
 	if err != nil {
 		return nil, err
 	}
 	if int(num(m["code"])) != 0 {
 		return nil, errors.New(nz(str(m["message"]), "详情不可用"))
 	}
-	vd := obj(obj(obj(obj(m["data"])["video_detail_data"])[id])["video_data"])
+	data := obj(m["data"])
+	vd := obj(data["video_data"])
+	if vd == nil {
+		vd = obj(obj(data[id])["video_data"])
+	}
+	if vd == nil {
+		vd = obj(obj(obj(data["video_detail_data"])[id])["video_data"])
+	}
 	if vd == nil {
 		return nil, errors.New("详情节点为空")
 	}
@@ -724,8 +856,8 @@ func (c *Content) SeasonsQuick(cookie, seriesID string) ([]Season, error) {
 	if v, ok := c.get("seasons_quick:" + cur.AlbumID); ok {
 		return markCurrentSeason(v.([]Season), seriesID), nil
 	}
-	m, err := c.C.CallRetry(cookie, "/api/novel/origin/album/get_video_list/v1/", nil,
-		sign.Params{{K: "album_id", V: cur.AlbumID}, {K: "count", V: "100"}, {K: "offset", V: "0"}})
+	m, err := c.callDynamicAPI(cookie, "album_videos",
+		sign.Params{{K: "album_id", V: cur.AlbumID}, {K: "count", V: "100"}, {K: "offset", V: "0"}}, nil)
 	if err != nil || int(num(m["code"])) != 0 {
 		return c.Seasons(cookie, seriesID)
 	}
@@ -812,8 +944,8 @@ func (c *Content) Seasons(cookie, seriesID string) ([]Season, error) {
 	if v, ok := c.get("seasons:" + cur.AlbumID); ok {
 		return markCurrentSeason(v.([]Season), seriesID), nil
 	}
-	m, err := c.C.CallRetry(cookie, "/api/novel/origin/album/get_video_list/v1/", nil,
-		sign.Params{{K: "album_id", V: cur.AlbumID}, {K: "count", V: "100"}, {K: "offset", V: "0"}})
+	m, err := c.callDynamicAPI(cookie, "album_videos",
+		sign.Params{{K: "album_id", V: cur.AlbumID}, {K: "count", V: "100"}, {K: "offset", V: "0"}}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -836,8 +968,11 @@ func (c *Content) Seasons(cookie, seriesID string) ([]Season, error) {
 		if end > len(ids) {
 			end = len(ids)
 		}
-		m, err := c.C.CallRetry(cookie, PathAlbum, albumBody(seriesID, ids[start:end]), nil)
-		data := obj(obj(m["data"])["video_detail_data"])
+		m, err := c.callDynamicAPI(cookie, "detail_batch", nil, map[string]any{"series_id": strings.Join(ids[start:end], ",")})
+		data := obj(m["data"])
+		if vdd := obj(data["video_detail_data"]); vdd != nil {
+			data = vdd
+		}
 		if err == nil && int(num(m["code"])) == 0 && data != nil {
 			for i := start; i < end; i++ {
 				vd := obj(obj(data[ids[i]])["video_data"])
@@ -1667,7 +1802,7 @@ func (c *Content) Comments(cookie, id, episodeID string, offset int) (map[string
 		kind = "item"
 	}
 	q = append(q, sign.Param{K: "offset", V: strconv.Itoa(offset)}, sign.Param{K: "count", V: "20"}, sign.Param{K: "sort", V: "1"})
-	m, err := c.C.Call(cookie, "/reading/ugc/novel_comment/"+kind+"/v1/", nil, q)
+	m, err := c.callDynamicAPI(cookie, "comments_"+kind, q, nil)
 	if err != nil {
 		return nil, err
 	}

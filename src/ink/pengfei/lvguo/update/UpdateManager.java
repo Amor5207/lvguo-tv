@@ -29,7 +29,7 @@ public final class UpdateManager {
     private static final ExecutorService POOL = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "update");
         t.setDaemon(true);
-        t.setPriority(Thread.MIN_PRIORITY);
+        t.setPriority(Thread.NORM_PRIORITY);
         return t;
     });
 
@@ -38,6 +38,7 @@ public final class UpdateManager {
     private static volatile File ready;
     private static volatile long done, total;
     private static volatile boolean checking, readyPrompted;
+    private static volatile long lastSessionCheckAt;
     private static volatile UpdateDownloader downloader;
     private static volatile UpdateDialog progressDialog;
 
@@ -57,7 +58,7 @@ public final class UpdateManager {
         } catch (Throwable e) { return "检查更新"; }
     }
 
-    /** 首页恢复时调用：静默检查（有节流）；有后台下好的新版本则提示安装。绝不抛异常。 */
+    /** 首页恢复时调用：每次冷启动立即检查；同一次进程内按间隔节流；有后台下好的新版本则提示安装。绝不抛异常。 */
     public static void onHomeResume(Activity host) {
         try {
             resumePendingInstall(host);
@@ -65,7 +66,7 @@ public final class UpdateManager {
             if (state == State.DOWNLOADING || checking) return;
             if (state == State.AVAILABLE && info != null && shouldPrompt(info)) { showFound(host); return; }
             long now = System.currentTimeMillis();
-            if (now - prefs().getLong(P_LAST, 0) < UpdateConfig.checkInterval(host)) return;
+            if (lastSessionCheckAt > 0 && now - lastSessionCheckAt < UpdateConfig.checkInterval(host)) return;
             runCheck(host, false);
         } catch (Throwable ignored) { }
     }
@@ -125,7 +126,9 @@ public final class UpdateManager {
             try { r = UpdateChecker.check(app); } catch (Throwable e) { r = new UpdateChecker.Result(false, null); }
             checking = false;
             if (r.ok) {
-                prefs().edit().putLong(P_LAST, System.currentTimeMillis()).apply();
+                long checkedAt = System.currentTimeMillis();
+                lastSessionCheckAt = checkedAt;
+                prefs().edit().putLong(P_LAST, checkedAt).apply();
                 purgeExcept(app, r.info == null ? -1 : r.info.versionCode);   // 服务器已不提供的版本，残留安装包不再保留
             }
             final UpdateChecker.Result res = r;

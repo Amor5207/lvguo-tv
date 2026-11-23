@@ -113,7 +113,7 @@ public final class Repo {
             q.put("session_uuid", session);
             if (offset > 0) q.put("offset", String.valueOf(offset));
 
-            JSONObject j = LvguoApi.call(Browse.BOOKMALL_CELL_CHANGE_PATH, null, q);
+            JSONObject j = LvguoApi.callDynamic("rank", q, null);
             if (j.optInt("code", -1) != 0) break;
             JSONObject cv = j.optJSONObject("data");
             cv = cv == null ? null : cv.optJSONObject("cell_view");
@@ -225,7 +225,7 @@ public final class Repo {
 
         Detail d;
         try {
-            d = parseAlbumDetail(callRetry(ALBUM_DETAIL, albumBody(seriesId, null), null), seriesId);
+            d = parseAlbumDetail(LvguoApi.callDynamic("detail", null, new JSONObject().put("series_id", seriesId)), seriesId);
         } catch (IllegalStateException e) {
 
             throw e;
@@ -243,54 +243,32 @@ public final class Repo {
         return detail(seriesId);
     }
 
-    // ------------------------------------------------------------ album_detail
+    // ------------------------------------------------------------ video_detail / multi_video_detail
 
-    private static final String ALBUM_DETAIL = "/novel/player/album_detail/v1/";
-    /** series_ids 每批上限：21 个以内正常返回，22 个起整体返空（不报错） */
-    private static final int DETAIL_BATCH = 21;
+    /** 批量详情每批上限 */
+    private static final int DETAIL_BATCH = 20;
 
-    /** album_detail 专用 biz_param：与 tools/hg_api.py 的 DETAIL_BIZ 一致（真机实测） */
-    private static JSONObject albumBiz() throws Exception {
-        JSONObject biz = new JSONObject();
-        biz.put("video_platform", 1024);            // VideoPlatformType.Mixed —— 唯一被接受的取值
-        biz.put("need_all_video_definition", true);
-        biz.put("need_mp4_align", true);
-        biz.put("use_os_player", false);
-        biz.put("device_level", LvguoApi.DEVICE_LEVEL_H265);   // >=4 才有标准 H.265
-        biz.put("screen_width_px", "1350");
-        biz.put("source", 7);
-        biz.put("video_id_type", 1);
-        return biz;
-    }
-
-    /**
-     * 请求体：album_id 必须为 string；series_ids 元素必须为 JSON 数字
-     * （服务端会把 string 报成 expected int, actual value: ... (string)）。
-     * batch 为 null 时只查 seriesId 一部。
-     */
-    private static JSONObject albumBody(String seriesId, List<String> batch) throws Exception {
-        JSONObject body = new JSONObject();
-        body.put("album_id", seriesId);
-        JSONArray ids = new JSONArray();
-        if (batch == null) {
-            ids.put(Long.parseLong(seriesId));
-        } else {
-            for (String s : batch) ids.put(Long.parseLong(s));
+    private static JSONObject batchSeriesBody(List<String> batch) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < batch.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append(batch.get(i));
         }
-        body.put("series_ids", ids);
-        body.put("biz_param", albumBiz());
-        body.put("need_video_detail_info", true);
-        return body;
+        return new JSONObject().put("series_id", sb.toString());
     }
 
-    /** 只接受请求的剧集节点，避免缺失条目被误替换成另一部剧。 */
+    /** 只接受请求的剧集节点，避免缺失条目被误替换成另一部剧。兼容单剧与批量响应结构。 */
     private static JSONObject videoData(JSONObject j, String seriesId) {
         JSONObject data = j == null ? null : j.optJSONObject("data");
         if (data == null) return null;
+        JSONObject direct = data.optJSONObject("video_data");
+        if (direct != null) return direct;
+        JSONObject node = data.optJSONObject(seriesId);
+        if (node != null && node.has("video_data")) return node.optJSONObject("video_data");
         JSONObject vdd = data.optJSONObject("video_detail_data");
         if (vdd == null) return null;
-        JSONObject node = vdd.optJSONObject(seriesId);
-        return node == null ? null : node.optJSONObject("video_data");
+        JSONObject legacy = vdd.optJSONObject(seriesId);
+        return legacy == null ? null : legacy.optJSONObject("video_data");
     }
 
     public static final class Season {
@@ -325,7 +303,7 @@ public final class Repo {
         List<Season> hit=cacheGet(key);if(seasonListComplete(hit,seriesId))return hit;
         Map<String,String> q=new java.util.LinkedHashMap<>();
         q.put("album_id",albumId);q.put("count","100");q.put("offset","0");
-        JSONObject root=LvguoApi.call("/api/novel/origin/album/get_video_list/v1/",null,q);
+        JSONObject root=LvguoApi.callDynamic("album_videos",q,null);
         JSONObject data=root.optJSONObject("data");
         JSONArray videos=data==null?null:data.optJSONArray("video_data_list");
         if(root.optInt("code",-1)!=0 || videos==null)throw new java.io.IOException("季列表加载失败，请重试");
@@ -344,11 +322,11 @@ public final class Repo {
         }
         for(int n=0;n<ids.size();n+=DETAIL_BATCH){
             List<String> batch=ids.subList(n,Math.min(ids.size(),n+DETAIL_BATCH));
-            JSONObject details=callRetry(ALBUM_DETAIL,albumBody(seriesId,batch),null);
+            JSONObject details=LvguoApi.callDynamic("detail_batch",null,batchSeriesBody(batch));
             if(details.optInt("code",-1)!=0)throw new java.io.IOException("季详情加载失败，请重试");
             for(String id:batch){
                 JSONObject response=details;JSONObject v=videoData(response,id);
-                if(v==null){try{response=callRetry(ALBUM_DETAIL,albumBody(id,java.util.Collections.singletonList(id)),null);v=videoData(response,id);}catch(Exception ignored){}}
+                if(v==null){try{response=LvguoApi.callDynamic("detail",null,new JSONObject().put("series_id",id));v=videoData(response,id);}catch(Exception ignored){}}
                 if(v==null)continue;
                 Detail d=parseAlbumDetail(response,id);
                 if(!d.multiSeason || d.seasonIndex<=0 || (d.relatedAlbumId!=null && !d.relatedAlbumId.isEmpty() && !albumId.equals(d.relatedAlbumId)))continue;
@@ -392,7 +370,7 @@ public final class Repo {
         List<Season> hit=cacheGet(key);if(seasonListComplete(hit,seriesId))return hit;
         Map<String,String> q=new java.util.LinkedHashMap<>();
         q.put("album_id",albumId);q.put("count","100");q.put("offset","0");
-        JSONObject root=LvguoApi.call("/api/novel/origin/album/get_video_list/v1/",null,q);
+        JSONObject root=LvguoApi.callDynamic("album_videos",q,null);
         JSONArray videos=root==null?null:root.optJSONObject("data")==null?null:root.optJSONObject("data").optJSONArray("video_data_list");
         if(root==null||root.optInt("code",-1)!=0||videos==null)return seasons(seriesId,albumId);
         java.util.LinkedHashMap<String,Object[]> rows=new java.util.LinkedHashMap<>();
@@ -603,15 +581,15 @@ public final class Repo {
         for (int i = 0; i < ids.size(); i += DETAIL_BATCH) {
             List<String> batch = ids.subList(i, Math.min(ids.size(), i + DETAIL_BATCH));
             try {
-                JSONObject j = callRetry(ALBUM_DETAIL, albumBody(batch.get(0), batch), null);
+                JSONObject j = LvguoApi.callDynamic("detail_batch", null, batchSeriesBody(batch));
                 if (j.optInt("code", -1) != 0) continue;
                 JSONObject data = j.optJSONObject("data");
-                JSONObject vdd = data == null ? null : data.optJSONObject("video_detail_data");
-                if (vdd == null) continue;
-                java.util.Iterator<String> it = vdd.keys();
+                if (data == null) continue;
+                if (data.optJSONObject("video_detail_data") != null) data = data.optJSONObject("video_detail_data");
+                java.util.Iterator<String> it = data.keys();
                 while (it.hasNext()) {
                     String sid = it.next();
-                    JSONObject node = vdd.optJSONObject(sid);
+                    JSONObject node = data.optJSONObject(sid);
                     if (node == null || !node.has("video_data")) continue;
                     try {
                         // parseAlbumDetail 走 videoData(j, sid) 精确匹配，逐个解析

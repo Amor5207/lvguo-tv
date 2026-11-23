@@ -27,6 +27,6 @@ final class UpdateConfig {
     static long checkInterval(Context c) {
         return "test".equals(channel(c)) ? 60_000L : CHECK_INTERVAL_MS;
     }
-    static final long CHECK_INTERVAL_MS = 6 * 3600_000L;
-    static final int CONNECT_TIMEOUT_MS = 6_000, READ_TIMEOUT_MS = 10_000;
+    static final long CHECK_INTERVAL_MS = 10 * 60_000L;
+    static final int CONNECT_TIMEOUT_MS = 4_000, READ_TIMEOUT_MS = 6_000;
 }

@@ -167,10 +167,10 @@ public class RootActivity extends ink.pengfei.lvguo.PlaybackHostActivity {
             ink.pengfei.lvguo.net.LibrarySync.keepAliveIfStale();
             ink.pengfei.lvguo.net.LibrarySync.pull();
         }
-        // 检查更新：晚几秒、只在首页恢复时触发；整个流程失败都是静默的，不影响其它功能
-        try{getWindow().getDecorView().postDelayed(()->{
+        // 检查更新：打开首页立即在后台发起检查（不阻塞首帧），有新版本立刻弹窗提示
+        try{getWindow().getDecorView().post(()->{
             try{if(!isFinishing()&&!ink.pengfei.lvguo.care.RestMode.isResting())ink.pengfei.lvguo.update.UpdateManager.onHomeResume(this);}catch(Throwable ignored){}
-        },8000);}catch(Throwable ignored){}
+        });}catch(Throwable ignored){}
     }
 
     private void applyImmersive() {

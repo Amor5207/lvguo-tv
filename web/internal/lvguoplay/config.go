@@ -24,17 +24,127 @@ type PlaybackRouteConfig struct {
 	VideoPlatform int    `json:"video_platform,omitempty"`
 	NeedAll       *bool  `json:"need_all,omitempty"`
 }
+type APIEndpointConfig struct {
+	Method     string            `json:"method"`
+	Host       string            `json:"host"`
+	BackupHost string            `json:"backup_host,omitempty"`
+	Path       string            `json:"path"`
+	Sign       string            `json:"sign"`
+	Query      map[string]string `json:"query,omitempty"`
+	Body       map[string]any    `json:"body,omitempty"`
+}
+
 type PlaybackConfig struct {
-	Schema   int                 `json:"schema"`
-	Revision int                 `json:"revision"`
-	Routes   []string            `json:"routes"`
-	Legacy   PlaybackRouteConfig `json:"legacy"`
-	Single   PlaybackRouteConfig `json:"single"`
+	Schema   int                          `json:"schema"`
+	Revision int                          `json:"revision"`
+	Routes   []string                     `json:"routes"`
+	Legacy   PlaybackRouteConfig          `json:"legacy"`
+	Single   PlaybackRouteConfig          `json:"single"`
+	APIs     map[string]APIEndpointConfig `json:"apis,omitempty"`
+}
+
+func defaultAPIConfigs() map[string]APIEndpointConfig {
+	const primary, backup = "api5-normal-sinfonlinea.fqnovel.com", "api3-normal-sinfonlinea.fqnovel.com"
+	return map[string]APIEndpointConfig{
+		"detail": {
+			Method: "POST", Host: primary, BackupHost: backup, Path: "/novel/player/video_detail/v1/", Sign: "v5",
+			Body: map[string]any{
+				"biz_param": map[string]any{
+					"caller_scene": "single_col", "detail_page_version": 0, "from_video_id": "",
+					"need_all_video_definition": false, "need_mp4_align": false, "source": 4, "video_id_type": 1,
+				},
+			},
+		},
+		"detail_batch": {
+			Method: "POST", Host: primary, BackupHost: backup, Path: "/novel/player/multi_video_detail/player/v1", Sign: "v5",
+			Body: map[string]any{
+				"dr_scene": "player",
+				"biz_param": map[string]any{
+					"detail_page_version": 0, "need_all_video_definition": false, "need_mp4_align": false,
+					"source": 7, "use_os_player": false, "use_server_dns": false,
+				},
+			},
+		},
+		"rank": {
+			Method: "GET", Host: primary, BackupHost: backup, Path: "/reading/bookapi/bookmall/cell/change/v1/", Sign: "v5",
+			Query: map[string]string{"tab_type": "26", "client_req_type": "2", "client_template": "2", "screen_width_px": "1350"},
+		},
+		"album_videos": {
+			Method: "GET", Host: primary, BackupHost: backup, Path: "/api/novel/origin/album/get_video_list/v1/", Sign: "v5",
+		},
+		"comments_book": {
+			Method: "GET", Host: primary, BackupHost: backup, Path: "/reading/ugc/novel_comment/book/v1/", Sign: "v5",
+		},
+		"comments_item": {
+			Method: "GET", Host: primary, BackupHost: backup, Path: "/reading/ugc/novel_comment/item/v1/", Sign: "v5",
+		},
+	}
 }
 
 func defaultPlaybackConfig() PlaybackConfig {
 	yes := true
-	return PlaybackConfig{Schema: 1, Revision: 0, Routes: []string{"dynamic", "videotab", "legacy"}, Legacy: PlaybackRouteConfig{Endpoint: legacyMobileEndpoint, DeviceLevel: 1, VideoPlatform: 1024, NeedAll: &yes}, Single: PlaybackRouteConfig{Endpoint: miniReelSingleEndpoint, VideoPlatform: 3, NeedAll: &yes}}
+	return PlaybackConfig{Schema: 1, Revision: 0, Routes: []string{"dynamic", "videotab", "legacy"}, Legacy: PlaybackRouteConfig{Endpoint: legacyMobileEndpoint, DeviceLevel: 1, VideoPlatform: 1024, NeedAll: &yes}, Single: PlaybackRouteConfig{Endpoint: miniReelSingleEndpoint, VideoPlatform: 3, NeedAll: &yes}, APIs: defaultAPIConfigs()}
+}
+
+func validAPIHost(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if h == "" || strings.ContainsAny(h, "/:?#@\\ \t\r\n") {
+		return false
+	}
+	return (strings.HasSuffix(h, ".fqnovel.com") && h != ".fqnovel.com") ||
+		(strings.HasSuffix(h, ".snssdk.com") && h != ".snssdk.com")
+}
+
+func validAPIPath(p string) bool {
+	if len(p) < 2 || len(p) > 160 || p[0] != '/' || strings.Contains(p, "..") || strings.ContainsAny(p, "?#\\ \t\r\n") {
+		return false
+	}
+	return true
+}
+
+func (a APIEndpointConfig) validate() error {
+	m := strings.ToUpper(strings.TrimSpace(a.Method))
+	if m != "GET" && m != "POST" {
+		return errors.New("不支持的接口方法")
+	}
+	if !validAPIHost(a.Host) || (a.BackupHost != "" && !validAPIHost(a.BackupHost)) {
+		return errors.New("不支持的接口域名")
+	}
+	if !validAPIPath(a.Path) {
+		return errors.New("不支持的接口路径")
+	}
+	s := strings.ToLower(strings.TrimSpace(a.Sign))
+	if s != "" && s != "v5" && s != "minireel" && s != "none" {
+		return errors.New("不支持的接口签名策略")
+	}
+	return nil
+}
+
+func cloneAnyMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		if sub, ok := v.(map[string]any); ok {
+			out[k] = cloneAnyMap(sub)
+		} else {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func cloneAPIEndpoint(a APIEndpointConfig) APIEndpointConfig {
+	cp := a
+	if a.Query != nil {
+		cp.Query = make(map[string]string, len(a.Query))
+		for k, v := range a.Query {
+			cp.Query[k] = v
+		}
+	}
+	cp.Body = cloneAnyMap(a.Body)
+	return cp
 }
 func validPlaybackEndpoint(raw, expectedPath string) bool {
 	u, e := url.Parse(raw)
@@ -66,6 +176,11 @@ func (c PlaybackConfig) Validate() error {
 	}
 	if c.Single.VideoPlatform < 1 || c.Single.VideoPlatform > 10000 || c.Single.NeedAll == nil {
 		return errors.New("单集播放参数超出允许范围")
+	}
+	for _, api := range c.APIs {
+		if err := api.validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -169,3 +284,19 @@ func ConfigurePlayback(dataDir string) {
 	})
 }
 func PlaybackRoutes() []string { return playbackConfig.snapshot().Routes }
+
+// API returns the dynamically configured endpoint strategy for name,
+// falling back to the built-in signed default if not overridden remotely.
+func API(name string) APIEndpointConfig {
+	playbackConfig.mu.RLock()
+	cfg, ok := playbackConfig.current.APIs[name]
+	playbackConfig.mu.RUnlock()
+	if ok && cfg.validate() == nil {
+		return cloneAPIEndpoint(cfg)
+	}
+	defaults := defaultAPIConfigs()
+	if def, exists := defaults[name]; exists {
+		return cloneAPIEndpoint(def)
+	}
+	return APIEndpointConfig{}
+}
