@@ -7,7 +7,8 @@
   LV.esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   // ------------------------------------------------------------ 设置与主题
-  var DEF = { theme: 'auto', quality: '1080p', autonext: true, danmaku: true, dmOpacity: 0.85, dmSpeed: 1, dmSize: 1, dmArea: 0.5, keepRate: false, rate: 1, volume: 1, muted: false };
+  // keepRate 默认开：换集/切季沿用当前倍速（老版本默认关，手动切下一集会被拉回 1x）
+  var DEF = { theme: 'auto', quality: '1080p', autonext: true, danmaku: true, dmOpacity: 0.85, dmSpeed: 1, dmSize: 1, dmArea: 0.5, keepRate: true, rate: 1, volume: 1, muted: false };
   var store = {};
   try { store = JSON.parse(localStorage.getItem('lvguo.settings') || '{}'); } catch (e) {}
   // 旧版卡顿时会把「默认清晰度」悄悄改成 720p 并存下来，之后一直拿不到 1080p：清掉一次，回到默认（1080p）。之后只有用户自己选的才保存。

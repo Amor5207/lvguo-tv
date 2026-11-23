@@ -180,8 +180,8 @@ public class SettingsPage extends Page {
         play.items.add(new Item("autoplay", "自动连播", () -> App.prefs().getBoolean("autoplay_next", true) ? "开启" : "关闭", row ->
                 choiceOnOff(row, "自动连播", null, App.prefs().getBoolean("autoplay_next", true),
                         on -> App.prefs().edit().putBoolean("autoplay_next", on).apply())));
-        play.items.add(new Item("speedlock", "保持倍速", () -> App.prefs().getBoolean("speed_lock", false) ? "开启" : "关闭", row ->
-                choiceOnOff(row, "保持倍速", "换集后沿用倍速", App.prefs().getBoolean("speed_lock", false),
+        play.items.add(new Item("speedlock", "保持倍速", () -> App.prefs().getBoolean("speed_lock", App.SPEED_LOCK_DEFAULT) ? "开启" : "关闭", row ->
+                choiceOnOff(row, "保持倍速", "换集后沿用倍速", App.prefs().getBoolean("speed_lock", App.SPEED_LOCK_DEFAULT),
                         on -> App.prefs().edit().putBoolean("speed_lock", on).apply())));
         sections.add(play);
 

@@ -149,7 +149,7 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
         pendingResumePosition=playbackIntent().getIntExtra("position_ms",0);
         prefer=App.prefs().getString("quality","720p");if(prefer==null)prefer="720p";
 
-        speedLocked=App.prefs().getBoolean("speed_lock",false);
+        speedLocked=App.prefs().getBoolean("speed_lock",App.SPEED_LOCK_DEFAULT);
         playbackSpeed=speedLocked?App.prefs().getFloat("play_speed",1f):1f;
         feedMode=playbackIntent().getBooleanExtra(EXTRA_FEED,false) && (seriesId==null || seriesId.isEmpty());
         buildUi();

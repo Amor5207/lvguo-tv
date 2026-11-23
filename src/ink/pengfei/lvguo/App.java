@@ -26,6 +26,9 @@ public final class App extends Application {
             "com.phoenix.read/74132 (Linux; U; Android 13; zh_CN; 22041211AC; "
                     + "Build/TKQ1.220807.001;tt-ok/3.12.13.20)";
 
+    /** 「保持倍速」（speed_lock）默认值：默认开启，换集/换季沿用当前倍速，不再回到 1x。 */
+    public static final boolean SPEED_LOCK_DEFAULT = true;
+
     @Override
     public void onCreate() {
         super.onCreate();

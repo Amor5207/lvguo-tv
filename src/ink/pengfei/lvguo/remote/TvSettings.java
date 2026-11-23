@@ -102,7 +102,7 @@ public final class TvSettings {
                         choice("resume", "启动续播", RESUME, Math.max(0, Math.min(2, App.prefs().getInt("resume_on_launch", 0))), null),
                         choice("quality", "默认画质", QUALITY, qualityIndex(), null),
                         toggle("autoplay", "自动连播", App.prefs().getBoolean("autoplay_next", true), null),
-                        toggle("speedlock", "保持倍速", App.prefs().getBoolean("speed_lock", false), null)))
+                        toggle("speedlock", "保持倍速", App.prefs().getBoolean("speed_lock", App.SPEED_LOCK_DEFAULT), null)))
                 .put(group("弹幕", null,
                         toggle("dm_on", "弹幕显示", DanmakuView.enabled(), null),
                         choice("dm_speed", "弹幕速度", DanmakuView.SPEED_LABELS, DanmakuView.speedIndex(), null),

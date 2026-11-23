@@ -1344,10 +1344,17 @@
     function closePm() { var m = $('.pmenu', el); if (m) m.remove(); }
 
     // ---------- 视频元素：两路轮换，下一集在后台缓冲好，切集直接换上
+    // 倍速必须同时写 defaultPlaybackRate：浏览器给 <video> 指定 src 时会执行加载算法，
+    // 把 playbackRate 复位成 defaultPlaybackRate，只写 playbackRate 会被静默拉回 1x。
+    function applyRate(x) {
+      var r = +LV.get('rate') || 1;
+      if (x) { x.defaultPlaybackRate = r; x.playbackRate = r; }
+      return r;
+    }
     function mkVideo(poster) {
       var x = document.createElement('video'); x.playsInline = true; x.preload = 'auto'; x.className = 'vid';
       if (poster) x.poster = poster;
-      x.volume = LV.get('volume'); x.muted = LV.get('muted');
+      x.volume = LV.get('volume'); x.muted = LV.get('muted'); applyRate(x);
       ['loadedmetadata', 'playing', 'waiting', 'pause', 'play', 'seeked', 'canplay', 'error', 'ended'].forEach(function (ev) { x.addEventListener(ev, function (e) { if (PL === S && x === v) on[ev](e); }); });
       return x;
     }
@@ -1711,7 +1718,7 @@
       nv.classList.remove('pre');
       if (nv.readyState >= 2) nv.classList.remove('pending');
       else nv.classList.add('pending');
-      v = nv; v.muted = LV.get('muted'); v.playbackRate = LV.get('rate'); volIcon();
+      v = nv; v.muted = LV.get('muted'); applyRate(v); volIcon();
       if (old && old !== nv) old.pause();
       if (slideDir && old && old !== nv) {
         if (old.getAnimations) old.getAnimations().forEach(function (a) { a.cancel(); });
@@ -1818,6 +1825,8 @@
     }
     var on = {
       loadedmetadata: function () {
+        // 部分浏览器在元数据就绪时会把 playbackRate 打回默认值，这里再兜一次底
+        if ((+LV.get('rate') || 1) !== v.playbackRate) applyRate(v);
         if (v.videoWidth) { S.ar = v.videoWidth / v.videoHeight; el.style.setProperty('--ar', S.ar); el.classList.remove('noar'); }
         if (S.start > 0 && Number.isFinite(v.duration) && v.duration > 0) v.currentTime = Math.min(S.start, Math.max(0, v.duration - 0.25)); S.start = 0; dm.seek(v.currentTime);
       },
@@ -2048,7 +2057,7 @@
         case 'cancelnext': clearTimeout(S.nextT); var u = $('.upnext', el); if (u) u.remove(); break;
         case 'dock': var o2 = !el.classList.contains('dock-on'); el.classList.toggle('dock-on', o2); if (!feed) LV.set('dock', o2); if (o2) drawDock(); break;
         case 'dmset': return dmPanel();
-        case 'rate': return pmenu('rate', [0.75, 1, 1.25, 1.5, 2].map(function (r) { return [r + 'x', r, v.playbackRate === r]; }), function (r) { v.playbackRate = r; LV.set('rate', r); $('[data-a=rate]', el).textContent = r + 'x'; });
+        case 'rate': return pmenu('rate', [0.75, 1, 1.25, 1.5, 2].map(function (r) { return [r + 'x', r, v.playbackRate === r]; }), function (r) { LV.set('rate', r); applyRate(v); $('[data-a=rate]', el).textContent = r + 'x'; });
         case 'quality': if (!S.gears.length) return; return pmenu('quality', S.gears.map(function (g) { return [g.definition, g.definition, g.definition === S.def]; }).reverse(), function (q) { S.quality = q; LV.set('quality', q); dropPre();dropNextSeason();dropFeedWarms(); load(S.i, v.currentTime || 0, 0); });
       }
     }
