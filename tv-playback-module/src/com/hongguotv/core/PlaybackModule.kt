@@ -47,6 +47,9 @@ class PlaybackModule {
         }
     }
 
+    private fun egdiOf(dev: JSONObject): String =
+        dev.optString("klink_egdi", "").trim()
+
     // 2026-11-20 起上游对旧 V5 POST 一律回 200 空 body（dr_scene 已移入请求体）；
     // video_tab 空 body 签名 GET 是同一上游当前的可用播放路线。
     fun prepare(vid: String, identity: String): String {
@@ -54,6 +57,7 @@ class PlaybackModule {
         val dev = JSONObject(identity)
         ensureActivated(dev)
         val now = System.currentTimeMillis()
+        val egdi = egdiOf(dev)
         val params = linkedMapOf(
             "device_platform" to "android", "os" to "android", "ssmix" to "a",
             "cdid" to dev.getString("cdid"), "channel" to "vivo_8662_64",
@@ -64,11 +68,20 @@ class PlaybackModule {
             "device_type" to "PGT-AN10", "device_brand" to "HONOR",
             "language" to "zh", "os_api" to "31", "os_version" to "12",
             "ac" to "wifi", "host_abi" to "arm64-v8a",
+            "dragon_device_type" to "phone", "pv_player" to "74332",
+            "compliance_status" to "0", "need_personal_recommend" to "1",
+            "player_so_load" to "1", "is_android_pad_screen" to "0",
+            "rom_version" to "V417IR+release-keys",
             "iid" to dev.getString("iid"), "device_id" to dev.getString("device_id"),
-            "video_id" to vid, "video_id_type" to "0", "device_level" to "1",
-            "need_all_video_definition" to "1", "need_mp4_align" to "0",
-            "use_os_player" to "0", "video_platform" to "1024",
-            "source" to "0", "from_video_id" to "",
+        )
+        if (egdi.isNotEmpty()) params["klink_egdi"] = egdi
+        params.putAll(
+            linkedMapOf(
+                "video_id" to vid, "video_id_type" to "0", "device_level" to "1",
+                "need_all_video_definition" to "1", "need_mp4_align" to "0",
+                "use_os_player" to "0", "video_platform" to "1024",
+                "source" to "0", "from_video_id" to "",
+            )
         )
         val signed = signer.signPlayback("https://api5-normal-sinfonlinea.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/", params, null, now)
         val headers = JSONObject(signed.headers)
@@ -102,8 +115,14 @@ class PlaybackModule {
             "device_type" to "PGT-AN10", "device_brand" to "HONOR",
             "language" to "zh", "os_api" to "31", "os_version" to "12",
             "ac" to "wifi", "host_abi" to "arm64-v8a",
+            "dragon_device_type" to "phone", "pv_player" to "74332",
+            "compliance_status" to "0", "need_personal_recommend" to "1",
+            "player_so_load" to "1", "is_android_pad_screen" to "0",
+            "rom_version" to "V417IR+release-keys",
             "iid" to dev.getString("iid"), "device_id" to dev.getString("device_id"),
         )
+        val egdi = egdiOf(dev)
+        if (egdi.isNotEmpty()) params["klink_egdi"] = egdi
         val signed = signer.signPlayback(endpoint, params, gz, now)
         val headers = JSONObject(signed.headers)
         headers.put("User-Agent", "com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)")

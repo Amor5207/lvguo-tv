@@ -650,9 +650,24 @@ func (c *Content) callDynamicAPI(cookie, name string, extraQuery sign.Params, ex
 	var lastErr error
 	for _, host := range hosts {
 		p := sign.Params{
-			{K: "aid", V: "8662"}, {K: "app_name", V: "novelread"}, {K: "version_code", V: "74332"}, {K: "version_name", V: "7.4.3.32"},
-			{K: "channel", V: "vivo_8662_64"}, {K: "device_platform", V: "android"}, {K: "device_type", V: "PGT-AN10"}, {K: "os_version", V: "12"},
-			{K: "update_version_code", V: "74332"}, {K: "iid", V: dev.IID}, {K: "cdid", V: dev.CDID}, {K: "device_id", V: dev.ID}, {K: "_rticket", V: "0"},
+			{K: "device_platform", V: "android"}, {K: "os", V: "android"}, {K: "ssmix", V: "a"},
+			{K: "_rticket", V: "0"},
+			{K: "cdid", V: dev.CDID}, {K: "channel", V: "vivo_8662_64"},
+			{K: "aid", V: "8662"}, {K: "app_name", V: "novelread"},
+			{K: "version_code", V: "74332"}, {K: "version_name", V: "7.4.3.32"},
+			{K: "manifest_version_code", V: "74332"}, {K: "update_version_code", V: "74332"},
+			{K: "resolution", V: "1920*1080"}, {K: "dpi", V: "280"},
+			{K: "device_type", V: "PGT-AN10"}, {K: "device_brand", V: "HONOR"},
+			{K: "language", V: "zh"}, {K: "os_api", V: "31"}, {K: "os_version", V: "12"},
+			{K: "ac", V: "wifi"}, {K: "host_abi", V: "arm64-v8a"},
+			{K: "dragon_device_type", V: "phone"}, {K: "pv_player", V: "74332"},
+			{K: "compliance_status", V: "0"}, {K: "need_personal_recommend", V: "1"},
+			{K: "player_so_load", V: "1"}, {K: "is_android_pad_screen", V: "0"},
+			{K: "rom_version", V: "V417IR+release-keys"},
+			{K: "iid", V: dev.IID}, {K: "device_id", V: dev.ID},
+		}
+		if dev.EGDI != "" {
+			p = p.Set("klink_egdi", dev.EGDI)
 		}
 		for _, kv := range mergedQuery {
 			p = p.Set(kv.K, kv.V)

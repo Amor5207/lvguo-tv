@@ -266,6 +266,9 @@ func (c *passportClient) registerDeviceProfile(ctx context.Context, singlePlayba
 		}
 	}
 	c.session.Cookies["install_id"] = iid
+	if egdi := getID("klink_egdi", "egdi"); egdi != "" {
+		c.session.Cookies["klink_egdi"] = egdi
+	}
 	c.activateDevice(ctx, did, iid, singlePlayback)
 	return nil
 }

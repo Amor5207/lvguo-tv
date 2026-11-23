@@ -61,7 +61,7 @@ final class UpdateChecker {
                     while ((n = in.read(buf)) > 0 && (total += n) < 65536) bo.write(buf, 0, n);
                     JSONObject j = new JSONObject(bo.toString("UTF-8"));
                     if (!j.optBoolean("update")) return new Result(true, null);
-                    UpdateInfo info = new UpdateInfo(j);
+                    UpdateInfo info = new UpdateInfo(j, cur);
                     // A stale registry must never make a newer install "upgrade"
                     // to a numerically older release.
                     if (info.valid() && info.versionCode > cur && olderNumericVersion(info.versionName, version))

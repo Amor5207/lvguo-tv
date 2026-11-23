@@ -192,7 +192,7 @@ func medusaV5Token(nonce string) string {
 	return "A" + nonce + strings.Repeat("A", 24-len(nonce))
 }
 
-func medusaV5(rawURL string, body []byte, ts uint32, s *PlaybackSigner, who map[string]string, random func() float64) (string, error) {
+func medusaV5(rawURL string, body []byte, ts uint32, nowMs int64, s *PlaybackSigner, who map[string]string, random func() float64) (string, error) {
 	bodyMD5 := make([]byte, 16)
 	if body != nil {
 		bodyMD5 = MD5(body)
@@ -206,16 +206,46 @@ func medusaV5(rawURL string, body []byte, ts uint32, s *PlaybackSigner, who map[
 	if err != nil {
 		return "", err
 	}
-	flags := make([]byte, 8)
+	flags := Unhex("4480000000000000")
 	version := who["version_name"]
 	did := who["device_id"]
+	devType := who["device_type"]
+	brand := who["device_brand"]
+	if brand == "" {
+		brand = "HONOR"
+	}
 	secToken := medusaV5Token(s.processNonce)
-	device := new(proto).sint(1, 1).sint(2, 2).str(3, "8662").str(4, did).str(5, secToken).str(6, "!noperm!").str(12, "Asia/Shanghai,8").str(13, "zh_CN").str(22, who["os_version"]).sint(25, s.processStarted).str(30, who["device_type"]).str(31, "HONOR").str(32, who["device_type"]).str(34, "HONOR").get()
-	env := new(proto).str(6, "v04.10.03.04-bugfix").str(8, who["channel"]).bytes(12, device).str(14, version).get()
-	nested := new(proto).sint(1, 1).sint(2, 1).sint(3, 1).sint(5, 1).get()
+	started := s.processStarted
+	if started <= 0 {
+		started = nowMs
+	}
+	if nowMs <= 0 {
+		nowMs = int64(ts) * 1000
+	}
+	device := new(proto).
+		sint(1, 1).sint(2, 2).str(3, "8662").str(4, did).
+		str(5, secToken).str(6, "!noperm!").
+		sint(7, -888888).sint(8, -888888).sint(9, 3).sint(10, -888888).
+		str(11, "!notset!").str(12, "Asia/Shanghai,8").str(13, "zh_CN").
+		sint(14, 4).
+		flt(16, 0).flt(17, 0).flt(18, 0).flt(19, 0).flt(20, 0).flt(21, 0).
+		str(22, who["os_version"]).sint(23, 41).sint(24, 36).
+		sint(25, started).sint(26, started).sint(27, started).sint(28, nowMs).
+		sint(29, -1).str(30, devType).str(31, brand).str(32, devType).
+		str(33, devType).str(34, brand).str(35, brand).str(36, brand).
+		sint(38, 31).get()
+	envLaunch := int64(random()*21) + 100
+	envPID := int64(random()*2000) + 10001
+	envSub13 := new(proto).sint(1, int64(ts)).sint(2, -2).sint(4, 200).get()
+	env := new(proto).
+		sint(1, envLaunch).sint(2, 247235599).sint(3, 247235596).sint(5, 7).
+		str(6, "v04.10.03.04-bugfix").sint(7, envPID).str(8, who["channel"]).
+		bytes(12, device).bytes(13, envSub13).str(14, version).get()
+	nested := new(proto).sint(1, 305).sint(2, 4).sint(3, 694367).sint(5, 1621072674).get()
 	magic := Unhex("2d4b4fca49750d433fb5ae2c226dcc56")
 	key := Unhex("b23c2a470a20d105dc3f8c4438f8272ed46d6c89ffdcdedd5108698d26e9489d")
-	msg := new(proto).bytes(1, magic).sint(2, 5).sint(3, int64(u32rand(random))).str(4, "8662").str(5, did).str(6, "646637794").str(7, version).str(8, "v04.10.03-ml-android").sint(9, 0x040a0300).bytes(10, flags).sint(12, int64(ts)).bytes(13, f13).bytes(14, head(qh, 6)).bytes(15, nested).str(16, secToken).sint(17, int64(ts)).str(20, "none").sint(21, 377).bytes(23, env).str(24, `{"cmr":16777216,"cmr2":16777216,"un_h":11,"vpn":0,"kd":0,"dyn":"","do":1,"tk":true}`).get()
+	f24 := `{"cmr":16777216,"cmr2":16777216,"un_h":11,"vpn":0,"kd":0,"dyn":"","do":1,"tk":true}`
+	msg := new(proto).bytes(1, magic).sint(2, 5).sint(3, int64(u32rand(random))).str(4, "8662").str(5, did).str(6, "646637794").str(7, version).str(8, "v04.10.03-ml-android").sint(9, 0x040a0300).bytes(10, flags).sint(12, int64(ts)).bytes(13, f13).bytes(14, head(qh, 6)).bytes(15, nested).str(16, secToken).sint(17, int64(ts)).str(20, "none").sint(21, 312).bytes(23, env).str(24, f24).get()
 	nonce := u32rand(random)
 	hash := SM3(cat(key, le32(nonce), key))
 	high := (nonce >> 16) & 255
@@ -278,14 +308,23 @@ func (s *PlaybackSigner) SignMobileV5(base string, values Params, body []byte, n
 			continue
 		}
 		u := base + "?" + encoded
-		// Kotlin consumes the Gorgon nonce even though v5 does not transmit it.
-		_ = int(random() * 65536)
+		gorgonRandom := int(random() * 65536)
 		h := heliosV5(ts, int(u32rand(random)))
-		med, err := medusaV5(u, body, ts, s, who, random)
+		med, err := medusaV5(u, body, ts, nowMs, s, who, random)
 		if err != nil {
 			return nil, err
 		}
-		return &Signed{URL: u, Headers: [][2]string{{"x-khronos", strconv.FormatUint(uint64(ts), 10)}, {"x-helios", h}, {"x-medusa", med}, {"x-ss-stub", strings.ToUpper(Hex(MD5(body)))}, {"Content-Type", "application/json; charset=utf-8"}}}, nil
+		return &Signed{URL: u, Headers: [][2]string{
+			{"x-khronos", strconv.FormatUint(uint64(ts), 10)},
+			{"x-gorgon", gorgon(encoded, body, ts, gorgonRandom)},
+			{"x-argus", B64Encode(le32(ts))},
+			{"x-ladon", B64Encode(be32(ts))},
+			{"x-helios", h},
+			{"x-medusa", med},
+			{"x-xs-from-web", "0"},
+			{"x-ss-stub", strings.ToUpper(Hex(MD5(body)))},
+			{"Content-Type", "application/json; charset=utf-8"},
+		}}, nil
 	}
 	return nil, errors.New("无法生成 v5 播放签名")
 }

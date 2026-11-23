@@ -116,14 +116,17 @@ type Device struct {
 	OpenUDID, ClientUDID string
 	// Region 是红果注册时按出口 IP 给设备打的「商店地区」（Set-Cookie store-region），取流只认大陆
 	Region string
+	// EGDI 是 device_register 返回的 klink_egdi 标识，供完整公共参数拼接使用。
+	EGDI string
 }
 
 type DeviceStore struct {
-	path string
-	mu   sync.Mutex
-	dev  Device
-	last time.Time // 上次成功注册或心跳的时间，对应 APK 的 last_config_time
-	fail time.Time
+	path      string
+	mu        sync.Mutex
+	dev       Device
+	activated bool
+	last      time.Time // 上次成功注册或心跳的时间，对应 APK 的 last_config_time
+	fail      time.Time
 }
 
 // heartbeatInterval 与红果 APK 的 DeviceRegisterThread 一致：有效身份每 6 小时用同一对 ID 心跳一次。
@@ -143,7 +146,7 @@ func NewDeviceStore(dir string) *DeviceStore {
 	if str("id") == "" || str("iid") == "" || str("id") == str("iid") || str("cdid") == "" || str("openudid") == "" || str("clientudid") == "" {
 		return d
 	}
-	d.dev = Device{ID: str("id"), IID: str("iid"), CDID: str("cdid"), OpenUDID: str("openudid"), ClientUDID: str("clientudid"), Region: str("region")}
+	d.dev = Device{ID: str("id"), IID: str("iid"), CDID: str("cdid"), OpenUDID: str("openudid"), ClientUDID: str("clientudid"), Region: str("region"), EGDI: str("egdi")}
 	if ts, ok := m["last_config_time"].(float64); ok && ts > 0 {
 		d.last = time.Unix(int64(ts), 0)
 	} else if st, err := os.Stat(d.path); err == nil {
@@ -160,7 +163,11 @@ func (d *DeviceStore) Get() (Device, error) {
 	if d.dev.ID == "" {
 		return d.registerLocked()
 	}
-	if time.Since(d.last) >= heartbeatInterval && (d.fail.IsZero() || time.Since(d.fail) >= 30*time.Minute) {
+	if !d.activated {
+		d.activated = true
+		go activateRegisteredDevice(d.dev.ID, d.dev.IID)
+	}
+	if (d.dev.EGDI == "" || time.Since(d.last) >= heartbeatInterval) && (d.fail.IsZero() || time.Since(d.fail) >= 30*time.Minute) {
 		d.heartbeatLocked() // 心跳失败不影响当前设备对的使用，30 分钟后再试
 	}
 	return d.dev, nil
@@ -188,6 +195,12 @@ func (d *DeviceStore) heartbeatLocked() bool {
 		d.fail = time.Now()
 		return false
 	}
+	if dev.EGDI != "" {
+		d.dev.EGDI = dev.EGDI
+	}
+	if dev.Region != "" {
+		d.dev.Region = dev.Region
+	}
 	d.fail = time.Time{}
 	d.last = time.Now()
 	d.save()
@@ -210,7 +223,7 @@ func (d *DeviceStore) Adopt(dev Device) {
 
 func (d *DeviceStore) save() {
 	b, _ := json.Marshal(map[string]any{"id": d.dev.ID, "iid": d.dev.IID, "cdid": d.dev.CDID, "openudid": d.dev.OpenUDID,
-		"clientudid": d.dev.ClientUDID, "region": d.dev.Region, "last_config_time": d.last.Unix()})
+		"clientudid": d.dev.ClientUDID, "region": d.dev.Region, "egdi": d.dev.EGDI, "last_config_time": d.last.Unix()})
 	_ = os.MkdirAll(filepath.Dir(d.path), 0o755)
 	_ = os.WriteFile(d.path, b, 0o600)
 }
@@ -308,8 +321,9 @@ func registerDevice(prev *Device) (Device, error) {
 			region = strings.TrimPrefix(strings.SplitN(c, ";", 2)[0], "store-region=")
 		}
 	}
+	egdi := firstStr(m, "klink_egdi", "egdi")
 	activateRegisteredDevice(dev, iid)
-	return Device{ID: dev, IID: iid, CDID: cdid, OpenUDID: openudid, ClientUDID: clientudid, Region: region}, nil
+	return Device{ID: dev, IID: iid, CDID: cdid, OpenUDID: openudid, ClientUDID: clientudid, Region: region, EGDI: egdi}, nil
 }
 
 func activateRegisteredDevice(did, iid string) {

@@ -117,7 +117,14 @@ func requestLegacy(ctx context.Context, vid string, cfg PlaybackRouteConfig, d m
 		{K: "device_type", V: "PGT-AN10"}, {K: "device_brand", V: "HONOR"},
 		{K: "language", V: "zh"}, {K: "os_api", V: "31"}, {K: "os_version", V: "12"},
 		{K: "ac", V: "wifi"}, {K: "host_abi", V: "arm64-v8a"},
+		{K: "dragon_device_type", V: "phone"}, {K: "pv_player", V: "74332"},
+		{K: "compliance_status", V: "0"}, {K: "need_personal_recommend", V: "1"},
+		{K: "player_so_load", V: "1"}, {K: "is_android_pad_screen", V: "0"},
+		{K: "rom_version", V: "V417IR+release-keys"},
 		{K: "iid", V: d.installID}, {K: "device_id", V: d.deviceID},
+	}
+	if d.egdi != "" {
+		p = p.Set("klink_egdi", d.egdi)
 	}
 	signer, err := sign.NewPlaybackSigner(d.deviceID, "7.4.3.32")
 	if err != nil {

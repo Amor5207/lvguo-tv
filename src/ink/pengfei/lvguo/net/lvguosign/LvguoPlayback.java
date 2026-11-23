@@ -96,7 +96,7 @@ public final class LvguoPlayback {
 
     // ---- 设备 ----
     static final class Device {
-        String cdid, clientudid, openudid; long created;
+        String cdid, clientudid, openudid, egdi; long created;
         String deviceID, installID; Map<String, String> cookies = new LinkedHashMap<>();
     }
     static String uuid() { return UUID.randomUUID().toString(); }
@@ -169,6 +169,7 @@ public final class LvguoPlayback {
             {"dragon_device_type", "phone"}, {"pv_player", "73932"}, {"compliance_status", "0"}, {"need_personal_recommend", "1"},
             {"player_so_load", "1"}, {"is_android_pad_screen", "0"}, {"openudid", d.openudid}};
         for (String[] p : kv) q.put(p[0], p[1] == null ? "" : p[1]);
+        if (d.egdi != null && !d.egdi.isEmpty()) q.put("klink_egdi", d.egdi);
         return q;
     }
 
@@ -264,6 +265,7 @@ public final class LvguoPlayback {
         String iid = extract(rs, "install_id_str"); if (iid.isEmpty()) iid = extract(rs, "install_id");
         if (did.isEmpty() || iid.isEmpty() || did.equals("0") || iid.equals("0")) throw new RuntimeException("注册未返回有效身份: " + new String(resp, StandardCharsets.UTF_8).substring(0, Math.min(200, resp.length)));
         d.deviceID = did; d.installID = iid;
+        d.egdi = extract(rs, "klink_egdi");
         // 从 Set-Cookie 提取 install_id 等（简化：直接放 install_id）
         d.cookies.put("install_id", iid);
         List<String> sc = c.getHeaderFields().get("Set-Cookie");
@@ -273,7 +275,26 @@ public final class LvguoPlayback {
             if (eq > 0) { String name = pair.substring(0, eq).trim();
                 if (name.equals("store-region") || name.equals("store-region-src") || name.equals("ttreq")) d.cookies.put(name, pair.substring(eq + 1).trim()); }
         }
+        activateDevice(did, iid);
         return d;
+    }
+
+    static void activateDevice(String did, String iid) {
+        HttpURLConnection ac = null;
+        try {
+            String u = "https://log5-applog-lf.fqnovel.com/service/2/app_alert_check/"
+                    + "?aid=8662&app_name=novelread&channel=xiaomi_8662_64&device_id=" + did
+                    + "&iid=" + iid + "&device_platform=android&os=android"
+                    + "&version_code=73932&version_name=7.3.9.32&_rticket=" + System.currentTimeMillis();
+            ac = (HttpURLConnection) new URL(u).openConnection();
+            ac.setConnectTimeout(4000);
+            ac.setReadTimeout(4000);
+            ac.setRequestProperty("User-Agent", SINGLE_UA);
+            if (ac.getResponseCode() == 200) readAll(ac.getInputStream());
+        } catch (Exception ignored) {
+        } finally {
+            if (ac != null) ac.disconnect();
+        }
     }
 
     static String cookieHeader(Device d) {
@@ -297,6 +318,7 @@ public final class LvguoPlayback {
         Device d = ensureModuleDevice();
         org.json.JSONObject out = new org.json.JSONObject();
         out.put("device_id", d.deviceID); out.put("iid", d.installID); out.put("cdid", d.cdid);
+        if (d.egdi != null && !d.egdi.isEmpty()) out.put("klink_egdi", d.egdi);
         return out.toString();
     }
     public static synchronized void rotateModuleIdentity() {

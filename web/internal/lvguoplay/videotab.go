@@ -48,12 +48,21 @@ func PlayVideoTab(ctx context.Context, vid string) (map[string]any, error) {
 		{K: "device_type", V: "PGT-AN10"}, {K: "device_brand", V: "HONOR"},
 		{K: "language", V: "zh"}, {K: "os_api", V: "31"}, {K: "os_version", V: "12"},
 		{K: "ac", V: "wifi"}, {K: "host_abi", V: "arm64-v8a"},
+		{K: "dragon_device_type", V: "phone"}, {K: "pv_player", V: "74332"},
+		{K: "compliance_status", V: "0"}, {K: "need_personal_recommend", V: "1"},
+		{K: "player_so_load", V: "1"}, {K: "is_android_pad_screen", V: "0"},
+		{K: "rom_version", V: "V417IR+release-keys"},
 		{K: "iid", V: d.installID}, {K: "device_id", V: d.deviceID},
-		{K: "video_id", V: vid}, {K: "video_id_type", V: "0"},
-		{K: "device_level", V: "1"}, {K: "need_all_video_definition", V: "1"},
-		{K: "need_mp4_align", V: "0"}, {K: "use_os_player", V: "0"},
-		{K: "video_platform", V: "1024"}, {K: "source", V: "0"}, {K: "from_video_id", V: ""},
 	}
+	if d.egdi != "" {
+		p = p.Set("klink_egdi", d.egdi)
+	}
+	p = append(p,
+		sign.Param{K: "video_id", V: vid}, sign.Param{K: "video_id_type", V: "0"},
+		sign.Param{K: "device_level", V: "1"}, sign.Param{K: "need_all_video_definition", V: "1"},
+		sign.Param{K: "need_mp4_align", V: "0"}, sign.Param{K: "use_os_player", V: "0"},
+		sign.Param{K: "video_platform", V: "1024"}, sign.Param{K: "source", V: "0"}, sign.Param{K: "from_video_id", V: ""},
+	)
 	signer, err := sign.NewPlaybackSigner(d.deviceID, "7.4.3.32")
 	if err != nil {
 		return nil, err

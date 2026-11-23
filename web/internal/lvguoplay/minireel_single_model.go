@@ -60,5 +60,6 @@ func registerMiniReelSingleDeviceAt(ctx context.Context, base string, httpClient
 	if err = c.registerDeviceProfile(ctx, true); err != nil {
 		return miniReelDevice{}, err
 	}
-	return miniReelDevice{deviceID: c.session.DeviceID, installID: c.session.InstallID, cdid: d.CDID, openUDID: d.OpenUDID, cookie: miniReelPlaybackCookieHeader(c.session.Cookies)}, nil
+	egdi := c.session.Cookies["klink_egdi"]
+	return miniReelDevice{deviceID: c.session.DeviceID, installID: c.session.InstallID, cdid: d.CDID, openUDID: d.OpenUDID, cookie: miniReelPlaybackCookieHeader(c.session.Cookies), egdi: egdi}, nil
 }

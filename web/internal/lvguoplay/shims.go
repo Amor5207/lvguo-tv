@@ -34,6 +34,7 @@ type miniReelDevice struct {
 	cdid      string
 	cookie    string
 	openUDID  string
+	egdi      string
 }
 
 type accountSession struct {

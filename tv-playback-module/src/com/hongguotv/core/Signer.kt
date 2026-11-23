@@ -376,27 +376,47 @@ internal class Signer(
     private fun medusaV5(url: String, body: ByteArray?, ts: Int, who: Map<String, String>): String {
         val query = sm3(url.substringAfter('?').toByteArray(Charsets.UTF_8))
         val f13 = hashF13(query, body?.let { digest("MD5", it) } ?: ByteArray(16), ts)
-        val flags = ByteArray(8)
+        val flags = hex("4480000000000000")
         val version = who.getValue("version_name")
+        val did = who.getValue("device_id")
+        val devType = who.getValue("device_type")
+        val brand = who["device_brand"]?.takeIf { it.isNotEmpty() } ?: "HONOR"
         val secToken = secDeviceToken()
+        val nowMs = clock()
         val deviceInfo = proto(
-            f(1, 1, "sint"), f(2, 2, "sint"), f(3, "8662"), f(4, who.getValue("device_id")),
-            f(5, secToken), f(6, "!noperm!"), f(12, "Asia/Shanghai,8"), f(13, "zh_CN"),
-            f(22, who.getValue("os_version")), f(25, processStarted, "sint"),
-            f(30, who.getValue("device_type")), f(31, "HONOR"),
-            f(32, who.getValue("device_type")), f(34, "HONOR"),
+            f(1, 1, "sint"), f(2, 2, "sint"), f(3, "8662"), f(4, did),
+            f(5, secToken), f(6, "!noperm!"),
+            f(7, -888888, "sint"), f(8, -888888, "sint"), f(9, 3, "sint"), f(10, -888888, "sint"),
+            f(11, "!notset!"), f(12, "Asia/Shanghai,8"), f(13, "zh_CN"),
+            f(14, 4, "sint"),
+            f(16, 0f, "float"), f(17, 0f, "float"), f(18, 0f, "float"),
+            f(19, 0f, "float"), f(20, 0f, "float"), f(21, 0f, "float"),
+            f(22, who.getValue("os_version")), f(23, 41, "sint"), f(24, 36, "sint"),
+            f(25, processStarted, "sint"), f(26, processStarted, "sint"),
+            f(27, processStarted, "sint"), f(28, nowMs, "sint"),
+            f(29, -1, "sint"), f(30, devType), f(31, brand), f(32, devType),
+            f(33, devType), f(34, brand), f(35, brand), f(36, brand),
+            f(38, 31, "sint"),
         )
-        val env = proto(f(6, "v04.10.03.04-bugfix"), f(8, who.getValue("channel")),
-            f(12, deviceInfo), f(14, version))
+        val envLaunch = (random() * 21).toInt() + 100
+        val envPid = (random() * 2000).toInt() + 10001
+        val envSub13 = proto(f(1, ts, "sint"), f(2, -2, "sint"), f(4, 200, "sint"))
+        val env = proto(
+            f(1, envLaunch, "sint"), f(2, 247235599, "sint"), f(3, 247235596, "sint"), f(5, 7, "sint"),
+            f(6, "v04.10.03.04-bugfix"), f(7, envPid, "sint"), f(8, who.getValue("channel")),
+            f(12, deviceInfo), f(13, envSub13), f(14, version),
+        )
+        val nested = proto(f(1, 305, "sint"), f(2, 4, "sint"), f(3, 694367, "sint"), f(5, 1621072674, "sint"))
+        val f24 = """{"cmr":16777216,"cmr2":16777216,"un_h":11,"vpn":0,"kd":0,"dyn":"","do":1,"tk":true}"""
         val message = proto(
             f(1, V5Constants.magic), f(2, 5, "sint"), f(3, unsigned(rand()), "sint"),
-            f(4, "8662"), f(5, who.getValue("device_id")), f(6, V5Constants.license),
+            f(4, "8662"), f(5, did), f(6, V5Constants.license),
             f(7, version), f(8, "v04.10.03-ml-android"), f(9, 0x040a0300, "sint"),
             f(10, flags), f(12, ts, "sint"), f(13, f13), f(14, query.copyOf(6)),
-            f(15, proto(f(1, 1, "sint"), f(2, 1, "sint"), f(3, 1, "sint"), f(5, 1, "sint"))),
+            f(15, nested),
             f(16, secToken),
-            f(17, ts, "sint"), f(20, "none"), f(21, 377, "sint"), f(23, env),
-            f(24, """{"cmr":16777216,"cmr2":16777216,"un_h":11,"vpn":0,"kd":0,"dyn":"","do":1,"tk":true}"""),
+            f(17, ts, "sint"), f(20, "none"), f(21, 312, "sint"), f(23, env),
+            f(24, f24),
         )
         val nonce = rand()
         val key = V5Constants.signKey
@@ -542,7 +562,7 @@ internal class Signer(
                 "x-gorgon" to gorgon(query, body, ts, (random() * 65536).toInt()),
                 "x-helios" to helios(ts), "x-medusa" to medusa(url, body, ts, if (mobileV5) values else null),
             )
-            if (mobileV5) headers.keys.retainAll(setOf("x-khronos", "x-helios", "x-medusa"))
+            if (mobileV5) headers.keys.retainAll(setOf("x-khronos", "x-gorgon", "x-argus", "x-ladon", "x-helios", "x-medusa", "x-xs-from-web"))
             if (body != null) {
                 headers["Content-Type"] = "application/json; charset=utf-8"
                 headers["x-ss-stub"] = digest("MD5", body).hex().uppercase()
