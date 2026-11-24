@@ -1313,7 +1313,7 @@
       '<div class="ctrl"><button class="cbtn plain pp" data-a="toggle" title="播放 / 暂停 (空格)" aria-label="播放 / 暂停">' + ic('pause') + '</button><button class="cbtn plain" data-a="prev" title="上一集 (P)" aria-label="上一集">' + ic('prev') + '</button><button class="cbtn plain" data-a="next" title="下一集 (N)" aria-label="下一集">' + ic('next') + '</button><span class="time">0:00 / 0:00</span><span class="sp"></span>' +
       (feed ? '<button class="cbtn plain" data-a="fav" title="追剧" aria-label="追剧">' + ic('heart') + '</button>' : '') +
       '<button class="cbtn plain" data-a="dm" title="弹幕开关 (D)" aria-label="弹幕开关">' + ic('danmaku') + '</button><button class="cbtn plain" data-a="dmset" title="弹幕设置" aria-label="弹幕设置">' + ic('sliders') + '</button><button class="cbtn plain" data-a="vol" title="音量 (M 静音)" aria-label="音量">' + ic('volume') + '</button>' +
-      '<button class="cbtn plain lbl" data-a="rate" title="倍速">1x</button><button class="cbtn plain lbl" data-a="quality" title="清晰度">720p</button><button class="cbtn plain lbl" data-a="dock" title="选集与评论 (T)">选集</button><button class="cbtn plain" data-a="full" title="全屏 (F)" aria-label="全屏">' + ic('full') + '</button></div></div></div>' +
+      '<button class="cbtn plain lbl" data-a="rate" title="倍速"><span class="rate-txt">1x</span><span class="rate-lock" data-a="togglelockrate" title="锁定倍速" aria-label="锁定倍速">' + ic('unlock') + '</span></button><button class="cbtn plain lbl" data-a="quality" title="清晰度">720p</button><button class="cbtn plain lbl" data-a="dock" title="选集与评论 (T)">选集</button><button class="cbtn plain" data-a="full" title="全屏 (F)" aria-label="全屏">' + ic('full') + '</button></div></div></div>' +
       (feed ? '<div class="fd-bar"><i></i></div>' : '') +
       '<aside class="dock"><div class="dh"><div class="dseg"><i></i><button class="dtab on" data-dt="eps">选集</button><button class="dtab" data-dt="cm">评论</button></div><button class="cbtn plain" data-a="dock" aria-label="收起">' + ic('close') + '</button></div><div class="db"></div></aside>';
     el.classList.toggle('dock-on', dockOn);
@@ -1324,7 +1324,18 @@
       feedHistoryEligible: !feed || index >= 1 || !!progressOf(d.id) };
     S.seasonDetails[d.id] = d;
     PL = S;
-    $('[data-a=rate]', el).textContent = LV.get('rate') + 'x';
+    function syncRateUI() {
+      var r = +LV.get('rate') || 1, locked = !!LV.get('keepRate');
+      var rt = $('[data-a=rate] .rate-txt', el), lb = $('[data-a=togglelockrate]', el);
+      if (rt) rt.textContent = r + 'x';
+      if (lb) {
+        lb.classList.toggle('on', locked);
+        lb.innerHTML = ic(locked ? 'lock' : 'unlock');
+        lb.title = locked ? '已锁定倍速，点击取消锁定' : '未锁定倍速，点击锁定';
+        lb.setAttribute('aria-label', locked ? '取消锁定倍速' : '锁定倍速');
+      }
+    }
+    syncRateUI();
     dm.config({ on: LV.get('danmaku'), op: LV.get('dmOpacity'), speed: LV.get('dmSpeed'), size: LV.get('dmSize'), area: LV.get('dmArea') });
     $('[data-a=dm]', el).classList.toggle('on', LV.get('danmaku'));
     if (!reuseHistory && !feed) window.history.pushState({ p: 1 }, '');
@@ -1337,17 +1348,24 @@
       el.classList.remove('idle'); clearTimeout(S.idle);
       S.idle = setTimeout(function hideWhenIdle() {
         if (PL !== S || !v || v.paused) return;
-        if ($('.prog.drag', el)) { S.idle = setTimeout(hideWhenIdle, 500); return; }
+        if ($('.prog.drag', el) || $('.pmenu', el) || $('.pbot:hover,.ptop:hover,.pmenu:hover,.fd-nav:hover', el)) { S.idle = setTimeout(hideWhenIdle, 500); return; }
         closePm(); el.classList.add('idle');
       }, 2800);
     }
     function closePm() { var m = $('.pmenu', el); if (m) m.remove(); }
 
     // ---------- 视频元素：两路轮换，下一集在后台缓冲好，切集直接换上
+    // 倍速必须同时写 defaultPlaybackRate：浏览器给 <video> 指定 src 时会执行加载算法，
+    // 把 playbackRate 复位成 defaultPlaybackRate，只写 playbackRate 会被静默拉回 1x。
+    function applyRate(x) {
+      var r = +LV.get('rate') || 1;
+      if (x) { x.defaultPlaybackRate = r; x.playbackRate = r; }
+      return r;
+    }
     function mkVideo(poster) {
       var x = document.createElement('video'); x.playsInline = true; x.preload = 'auto'; x.className = 'vid';
       if (poster) x.poster = poster;
-      x.volume = LV.get('volume'); x.muted = LV.get('muted');
+      x.volume = LV.get('volume'); x.muted = LV.get('muted'); applyRate(x);
       ['loadedmetadata', 'playing', 'waiting', 'pause', 'play', 'seeked', 'canplay', 'error', 'ended'].forEach(function (ev) { x.addEventListener(ev, function (e) { if (PL === S && x === v) on[ev](e); }); });
       return x;
     }
@@ -1682,7 +1700,7 @@
         S.recovery = { attempts: 0, timer: null, stable: null, stall: null };
         S.activeQuality = S.quality;
       } else if (options.quality) S.activeQuality = options.quality;
-      if (S.loaded && !LV.get('keepRate')) { LV.set('rate', 1); $('[data-a=rate]', el).textContent = '1x'; }
+      if (S.loaded && !LV.get('keepRate')) { LV.set('rate', 1); syncRateUI(); }
       var first = !S.loaded; S.loaded = true;
       rep.stop(); S.report = null; S.reportStarted = false; var tk = ++S.token; S.i = i; S.gi = null; S.cmN = 30; var ep = d.episodes[i];
       // 选新集后不能用上一集的档位列表做恢复；/api/play 的 q 只选清晰度，
@@ -1711,7 +1729,7 @@
       nv.classList.remove('pre');
       if (nv.readyState >= 2) nv.classList.remove('pending');
       else nv.classList.add('pending');
-      v = nv; v.muted = LV.get('muted'); v.playbackRate = LV.get('rate'); volIcon();
+      v = nv; v.muted = LV.get('muted'); applyRate(v); volIcon();
       if (old && old !== nv) old.pause();
       if (slideDir && old && old !== nv) {
         if (old.getAnimations) old.getAnimations().forEach(function (a) { a.cancel(); });
@@ -1818,6 +1836,8 @@
     }
     var on = {
       loadedmetadata: function () {
+        // 部分浏览器在元数据就绪时会把 playbackRate 打回默认值，这里再兜一次底
+        if ((+LV.get('rate') || 1) !== v.playbackRate) applyRate(v);
         if (v.videoWidth) { S.ar = v.videoWidth / v.videoHeight; el.style.setProperty('--ar', S.ar); el.classList.remove('noar'); }
         if (S.start > 0 && Number.isFinite(v.duration) && v.duration > 0) v.currentTime = Math.min(S.start, Math.max(0, v.duration - 0.25)); S.start = 0; dm.seek(v.currentTime);
       },
@@ -2014,6 +2034,27 @@
       });
       popAt(m, 'dmset', 120);
     }
+    function ratePanel() {
+      var had = $('.pmenu[data-k=rate]', el); closePm(); if (had) return;
+      var m = document.createElement('div'); m.className = 'pmenu'; m.dataset.k = 'rate';
+      var cur = +LV.get('rate') || 1, locked = !!LV.get('keepRate');
+      var rates = [0.75, 1, 1.25, 1.5, 2];
+      m.innerHTML = rates.map(function (r) {
+        var on = (v ? v.playbackRate : cur) === r;
+        return '<button type="button" data-rate="' + r + '" class="' + (on ? 'on' : '') + '">' + r + 'x' + (on ? ic('check') : '') + '</button>';
+      }).join('') + '<div class="pm-sep"></div><div class="pm-opt" data-keep-rate><span>锁定倍速</span><button type="button" class="sw' + (locked ? ' on' : '') + '" aria-label="锁定倍速"></button></div>';
+      m.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var rb = e.target.closest('[data-rate]');
+        if (rb) { LV.set('rate', +rb.dataset.rate); applyRate(v); syncRateUI(); closePm(); return; }
+        if (e.target.closest('[data-keep-rate]')) {
+          var next = !LV.get('keepRate'); LV.set('keepRate', next); syncRateUI();
+          var sw = $('.pm-opt .sw', m); if (sw) sw.classList.toggle('on', next);
+          LV.toast(next ? '已锁定倍速' : '已取消锁定倍速');
+        }
+      });
+      popAt(m, 'rate');
+    }
     function seek(dt) { if (!v || !v.duration) return; v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + dt)); flash(dt < 0 ? 'rew' : 'fwd'); }
     function step(dir) {
       var n = S.i + dir;
@@ -2027,10 +2068,10 @@
           if (feed) { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(function () {}); else el.classList.remove('full'); return; }
           return closePlayer();
         case 'toggle': if (!v) return; if (v.paused) v.play(); else v.pause(); break;
-        case 'prev': return step(-1);
-        case 'next': return step(1);
-        case 'fprev': return feedStep(-1);
-        case 'fnext': return feedStep(1);
+        case 'prev': closePm(); return step(-1);
+        case 'next': closePm(); return step(1);
+        case 'fprev': closePm(); return feedStep(-1);
+        case 'fnext': closePm(); return feedStep(1);
         case 'fav':
           if (!feed) return;
           if (!LV.loggedIn) return showLogin(function () { if (PL === S) route(); });
@@ -2043,15 +2084,23 @@
         case 'dm': var o = !LV.get('danmaku'); LV.set('danmaku', o); dm.config({ on: o }); $('[data-a=dm]', el).classList.toggle('on', o); LV.toast(o ? '弹幕已开启' : '弹幕已关闭'); break;
         case 'vol': return volPanel();
         case 'mute': v.muted = !v.muted; LV.set('muted', v.muted); volIcon(); LV.toast(v.muted ? '已静音' : '音量 ' + Math.round(v.volume * 100) + '%'); break;
-        case 'full': if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(function () {}); else if (el.requestFullscreen) el.requestFullscreen().catch(function () { if (v && v.webkitEnterFullscreen) v.webkitEnterFullscreen(); }); else if (v && v.webkitEnterFullscreen) v.webkitEnterFullscreen(); break;   // iPhone 只支持视频元素自身全屏
-        case 'retry': load(S.i, v && v.currentTime || 0, 0); break;
+        case 'full': closePm(); if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(function () {}); else if (el.requestFullscreen) el.requestFullscreen().catch(function () { if (v && v.webkitEnterFullscreen) v.webkitEnterFullscreen(); }); else if (v && v.webkitEnterFullscreen) v.webkitEnterFullscreen(); break;   // iPhone 只支持视频元素自身全屏
+        case 'retry': closePm(); load(S.i, v && v.currentTime || 0, 0); break;
         case 'cancelnext': clearTimeout(S.nextT); var u = $('.upnext', el); if (u) u.remove(); break;
-        case 'dock': var o2 = !el.classList.contains('dock-on'); el.classList.toggle('dock-on', o2); if (!feed) LV.set('dock', o2); if (o2) drawDock(); break;
+        case 'dock': closePm(); var o2 = !el.classList.contains('dock-on'); el.classList.toggle('dock-on', o2); if (!feed) LV.set('dock', o2); if (o2) drawDock(); break;
         case 'dmset': return dmPanel();
-        case 'rate': return pmenu('rate', [0.75, 1, 1.25, 1.5, 2].map(function (r) { return [r + 'x', r, v.playbackRate === r]; }), function (r) { v.playbackRate = r; LV.set('rate', r); $('[data-a=rate]', el).textContent = r + 'x'; });
+        case 'rate': return ratePanel();
+        case 'togglelockrate':
+          var nextLock = !LV.get('keepRate'); LV.set('keepRate', nextLock); syncRateUI();
+          var rsw = $('.pmenu[data-k=rate] .pm-opt .sw', el); if (rsw) rsw.classList.toggle('on', nextLock);
+          LV.toast(nextLock ? '已锁定倍速' : '已取消锁定倍速');
+          break;
         case 'quality': if (!S.gears.length) return; return pmenu('quality', S.gears.map(function (g) { return [g.definition, g.definition, g.definition === S.def]; }).reverse(), function (q) { S.quality = q; LV.set('quality', q); dropPre();dropNextSeason();dropFeedWarms(); load(S.i, v.currentTime || 0, 0); });
       }
     }
+    el.addEventListener('pointerdown', function (e) {
+      if (e.target.closest('.pbot,.ptop,.pmenu,.dock,.fd-nav')) showUI();
+    });
     el.addEventListener('click', function (e) {
       if (e.target.closest('.pbot,.ptop,.pmenu,.dock,.fd-nav')) showUI();
       var b = e.target.closest('[data-a]'); if (b) { e.stopPropagation(); return act(b.dataset.a); }
@@ -2111,15 +2160,16 @@
       }
     }
     document.addEventListener('keydown', key);
-    function onFs() { el.classList.toggle('full', document.fullscreenElement === el); }
+    function onFs() { closePm(); el.classList.toggle('full', document.fullscreenElement === el); }
     document.addEventListener('fullscreenchange', onFs);
+    window.addEventListener('resize', closePm);
     function onPop() { if (PL && !feed) closePlayer(true); }
     window.addEventListener('popstate', onPop);
     function closePlayer(fromPop) {
       if (!PL) return; var cur = S; PL = null;
       cancelAnimationFrame(cur.raf); clearTimeout(cur.idle); clearTimeout(cur.nextT); clearTimeout(cur.ck); clearInterval(cur.dropT);
       clearTimeout(cur.slideTimer);
-      document.removeEventListener('keydown', key); document.removeEventListener('fullscreenchange', onFs); window.removeEventListener('popstate', onPop);
+      document.removeEventListener('keydown', key); document.removeEventListener('fullscreenchange', onFs); window.removeEventListener('resize', closePm); window.removeEventListener('popstate', onPop);
       clearTimeout(cur.preT); clearTimeout(cur.loadingTimer); clearTimeout(cur.recovery.timer); clearTimeout(cur.recovery.stall); clearTimeout(cur.recovery.stable); if (cur.frameCancel) cur.frameCancel();
       var savedProgress = persistSeriesProgress();
       var saved = rep.stop(); dropPre(); dropNextSeason(); dropFeedWarms(); $$('video', stage).forEach(function (x) { x.pause(); x.removeAttribute('src'); x.load(); }); dm.clear();

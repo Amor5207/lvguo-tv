@@ -40,7 +40,9 @@
     plus: '<path d="M12 5v14M5 12h14"/>',
     library: '<path d="M5 4.5v15M10 4.5v15"/><path d="m14.4 5.6 4.4-1.1 3.3 14.6-4.4 1.1z" transform="translate(-1.6 0)"/>',
     sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
-    clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'
+    clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+    lock: '<rect x="5" y="11" width="14" height="10" rx="2.2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/>',
+    unlock: '<rect x="5" y="11" width="14" height="10" rx="2.2"/><path d="M8 11V7.5a4 4 0 0 1 7.6-1.7"/>'
   };
   var s = '<svg xmlns="http://www.w3.org/2000/svg" style="display:none"><defs>';
   for (var k in P) s += '<symbol id="i-' + k + '" viewBox="0 0 24 24">' + P[k] + '</symbol>';
