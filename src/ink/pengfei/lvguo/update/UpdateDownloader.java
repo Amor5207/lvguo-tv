@@ -50,6 +50,7 @@ final class UpdateDownloader {
 
     private void fetch(UpdateInfo info, File part, Progress p) throws Exception {
         long have = part.isFile() ? part.length() : 0;
+        if (have == info.size && info.size > 0) return;
         if (have > info.size) { //noinspection ResultOfMethodCallIgnored
             part.delete(); have = 0; }
         HttpURLConnection h = (HttpURLConnection) new URL(info.url).openConnection();
@@ -59,6 +60,8 @@ final class UpdateDownloader {
             h.setRequestProperty("User-Agent", UpdateChecker.userAgent());
             if (have > 0) h.setRequestProperty("Range", "bytes=" + have + "-");
             int code = h.getResponseCode();
+            if (code == 416) { //noinspection ResultOfMethodCallIgnored
+                part.delete(); throw new java.io.IOException("HTTP 416"); }
             if (code == 200) have = 0;                       // 服务器不支持续传：从头来
             else if (code != 206) throw new java.io.IOException("HTTP " + code);
             try (InputStream in = h.getInputStream(); RandomAccessFile f = new RandomAccessFile(part, "rw")) {

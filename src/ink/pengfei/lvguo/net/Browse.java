@@ -43,7 +43,8 @@ public final class Browse {
             throw new java.io.IOException(root.optString("message","推荐加载失败"));
         Result result=new Result();
         result.next=cell.optInt("next_offset",offset);result.more=cell.optBoolean("has_more") && result.next>offset;
-        result.session=cell.optString("session_id",session);result.selector=cell.optJSONObject("cell_selector");
+        String respSid = cell.optString("session_id", "");
+        result.session = respSid.isEmpty() ? sid : respSid; result.selector=cell.optJSONObject("cell_selector");
         if(result.selector!=null){categorySelector=result.selector;ink.pengfei.lvguo.App.prefs().edit().putString("category_selector_v2",result.selector.toString()).apply();}
         collect(cell.optJSONArray("cell_data"),result.items,new HashSet<>());
         if(!result.items.isEmpty())Catalog.merge(result.items);
@@ -194,7 +195,11 @@ public final class Browse {
         if(raw==null||raw.isEmpty())return false;String[] names={label};
         if(label.equals("历史古代")||label.equals("古装"))names=new String[]{"古代","古风","古装"};
         if(label.equals("校园"))names=new String[]{"校园","青春"};
-        try{JSONArray tags=new JSONArray(raw);for(int i=0;i<tags.length();i++){JSONObject tag=tags.optJSONObject(i);String name=tag==null?"":tag.optString("name");for(String candidate:names)if(name.contains(candidate))return true;}}catch(Exception ignored){}
+        String text = raw.trim();
+        if (text.startsWith("[")) {
+            try{JSONArray tags=new JSONArray(text);for(int i=0;i<tags.length();i++){JSONObject tag=tags.optJSONObject(i);String name=tag==null?"":tag.optString("name");for(String candidate:names)if(name.contains(candidate))return true;}}catch(Exception ignored){}
+        }
+        for (String candidate : names) if (text.contains(candidate)) return true;
         return false;
     }
     public static JSONObject comments(String id,int offset) throws Exception {

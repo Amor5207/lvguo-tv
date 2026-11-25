@@ -83,8 +83,13 @@ func (s *Server) me(ss *sess, w http.ResponseWriter, r *http.Request) (any, erro
 		return nil, err
 	}
 	p.Avatar, p.Cover = imgURL(p.Avatar), imgURL(p.Cover)
-	if time.Since(ss.lastBeat) > 6*time.Hour {
+	s.mu.Lock()
+	needBeat := time.Since(ss.lastBeat) > 6*time.Hour
+	if needBeat {
 		ss.lastBeat = time.Now()
+	}
+	s.mu.Unlock()
+	if needBeat {
 		go func() { _ = ss.acct.Heartbeat(); s.persist(ss) }()
 	}
 	days := -1
@@ -336,7 +341,7 @@ func (s *Server) forYouBatch(ss *sess, ch string, offset int, cursor, session st
 		}
 		for i, g := range got {
 			// 后续页的 offset 是推算的：只有前一页的真实游标正好落在推算位置时才采用，否则交由前端续取
-			if g == nil || (i > 0 && (got[i-1] == nil || got[i-1].p.Next != offs[i])) {
+			if g == nil || !p.More || (i > 0 && (got[i-1] == nil || got[i-1].p.Next != offs[i])) {
 				break
 			}
 			for _, it := range g.p.Items {

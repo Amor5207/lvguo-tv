@@ -96,7 +96,7 @@ public final class FilterPage extends Page {
         return d;
     }
     private void selectedReset(){java.util.List<String> keys=new java.util.ArrayList<>();java.util.Iterator<String> it=selected.keys();while(it.hasNext())keys.add(it.next());for(String key:keys)selected.remove(key);}
-    private void loadCategoryOptions(){final String wanted=contentType;final int token=++generation;loading=false;App.io().execute(()->{try{JSONObject data=Browse.categoryOptions(wanted);host.runOnUiThread(()->{if(token!=generation||!wanted.equals(contentType))return;categoryOptions=data;configure(null);reset();});}catch(Exception e){host.runOnUiThread(()->{if(token!=generation)return;status.setText("分类加载失败");status.setVisibility(View.VISIBLE);more.setText("重试");});}});}
+    private void loadCategoryOptions(){final String wanted=contentType;final int token=++generation;loading=false;App.io().execute(()->{try{JSONObject data=Browse.categoryOptions(wanted);host.runOnUiThread(()->{if(token!=generation||!wanted.equals(contentType))return;categoryOptions=data;configure(null);reset();});}catch(Exception e){host.runOnUiThread(()->{if(token!=generation)return;status.setText("分类加载失败");status.setVisibility(View.VISIBLE);more.setText("重试");more.setVisibility(View.VISIBLE);more.setFocusable(true);});}});}
     private void configure(JSONObject selector){
         if(categoryOptions==null)return;try{groups.removeAllViews();chips.clear();first=null;
             JSONArray types=categoryOptions.getJSONArray("types"),boards=categoryOptions.getJSONArray("boards");

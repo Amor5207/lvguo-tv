@@ -99,9 +99,10 @@ public final class Repo {
     public static List<Series> rank(String board, String cellId, int limit) throws Exception {
         if (cellId == null || cellId.isEmpty()) cellId = DEFAULT_CELL;
         List<Series> out = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
         String session = UUID.randomUUID().toString();
-        int offset = 0;
-        while (out.size() < limit) {
+        int offset = 0, pages = 0;
+        while (out.size() < limit && pages++ < 20) {
             Map<String, String> q = new HashMap<>();
             q.put("cell_id", cellId);
             q.put("tab_type", TAB_VIDEO);
@@ -119,6 +120,8 @@ public final class Repo {
             JSONObject cv = j.optJSONObject("data");
             cv = cv == null ? null : cv.optJSONObject("cell_view");
             if (cv == null) break;
+            String respSession = cv.optString("session_id", "");
+            if (!respSession.isEmpty()) session = respSession;
             JSONArray cells = cv.optJSONArray("cell_data");
             if (cells == null || cells.length() == 0) break;
 
@@ -135,7 +138,7 @@ public final class Repo {
                 }
                 if (v == null) continue;
                 String sid = v.optString("series_id", "");
-                if (sid.isEmpty()) continue;
+                if (sid.isEmpty() || !seen.add(sid)) continue;
                 Series s = new Series();
                 s.seriesId = sid;
                 s.title = optStr(v, "series_title", optStr(v, "title", ""));
@@ -148,7 +151,9 @@ public final class Repo {
                 out.add(s);
             }
             if (!cv.optBoolean("has_more", false)) break;
-            offset = cv.optInt("next_offset", offset + cells.length());
+            int nextOffset = cv.optInt("next_offset", offset + cells.length());
+            if (nextOffset <= offset) break;
+            offset = nextOffset;
         }
         if (out.size() > limit) return out.subList(0, limit);
         return out;
@@ -361,7 +366,7 @@ public final class Repo {
         if(albumId==null||albumId.isEmpty())return null;
         List<Season> hit=cacheGet("seasons_quick:"+albumId);
         if(seasonListComplete(hit,seriesId))return hit;
-        List<Season> full=cacheGet("seasons:"+albumId);
+        List<Season> full=cacheGet("seasons_v2:"+albumId);
         return seasonListComplete(full,seriesId)?full:null;
     }
 

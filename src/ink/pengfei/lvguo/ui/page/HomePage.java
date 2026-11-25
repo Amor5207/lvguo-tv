@@ -27,7 +27,7 @@ public class HomePage extends Page {
     private TextView eyebrow, title, meta, intro;
     private LinearLayout info;
     private View first, gridTitle;
-    private boolean loading, started, hasMore = true, billboardFromUser, autoFocus = true;
+    private boolean loading, started, hasMore = true, feedFirstPage = true, billboardFromUser, autoFocus = true;
     private int cursor, navId, generation, feedIndex, feedsVisited, emptyPages;
     private String session = UUID.randomUUID().toString();
     private final Set<String> seen = new HashSet<>();
@@ -380,7 +380,7 @@ public class HomePage extends Page {
     }
 
     private void reset() {
-        emptyPages = 0; generation++; cursor = 0; feedIndex = (feedIndex + 1) % FEEDS.length; feedsVisited = 0;
+        emptyPages = 0; generation++; cursor = 0; feedFirstPage = true; feedIndex = (feedIndex + 1) % FEEDS.length; feedsVisited = 0;
         session = UUID.randomUUID().toString(); seen.clear(); billboardFromUser = false; shownId = "";
         grid.setData(null); grid.showLoading(); loading = false; hasMore = true; loadMore();
         scroll.scrollTo(0, 0);
@@ -497,21 +497,26 @@ public class HomePage extends Page {
         if (loading || !hasMore) return;
         loading = true;
         final int token = generation, offset = cursor;
+        final boolean firstPage = feedFirstPage;
         final String sid = session, filter = FEEDS[feedIndex];
         more.setText("•••"); status.setText(""); grid.showTailLoading();
         App.io().execute(() -> {
             try {
                 // 登录后用账号的个性化推荐流（与红果手机首页同源）；失败才退回推荐榜
                 Browse.Result fetched;
+                boolean usedForYou = false;
                 // 漫剧 / 真人剧频道失败时不拿榜单顶替（内容对不上），直接报错可重试
                 final String ch = channel;
-                try { fetched = Session.loggedIn() ? Browse.forYou(ch, offset, offset == 0) : Browse.page(Repo.BOARD_RECOMMEND, filter, offset, sid); }
-                catch (Exception e) { if (!Browse.CH_RECOMMEND.equals(ch)) throw e; fetched = Browse.page(Repo.BOARD_RECOMMEND, filter, offset, sid); }
+                try {
+                    if (Session.loggedIn()) { fetched = Browse.forYou(ch, offset, firstPage); usedForYou = true; }
+                    else fetched = Browse.page(Repo.BOARD_RECOMMEND, filter, offset, sid);
+                } catch (Exception e) { if (!Browse.CH_RECOMMEND.equals(ch)) throw e; fetched = Browse.page(Repo.BOARD_RECOMMEND, filter, offset, sid); }
                 final Browse.Result result = fetched;
+                final boolean fromForYou = usedForYou;
                 host.runOnUiThread(() -> {
                     if (token != generation) return;
-                    loading = false; cursor = result.next; session = result.session; hasMore = result.more;
-                    if (!hasMore && ++feedsVisited < FEEDS.length) { feedIndex = (feedIndex + 1) % FEEDS.length; cursor = 0; session = UUID.randomUUID().toString(); hasMore = true; }
+                    loading = false; cursor = result.next; session = result.session; hasMore = result.more; feedFirstPage = false;
+                    if (!fromForYou && !hasMore && ++feedsVisited < FEEDS.length) { feedIndex = (feedIndex + 1) % FEEDS.length; cursor = 0; session = UUID.randomUUID().toString(); hasMore = true; }
                     List<Series> add = new ArrayList<>();
                     for (Series s : result.items) if (seen.add(s.seriesId)) add.add(s);
                     emptyPages = add.isEmpty() ? emptyPages + 1 : 0;
@@ -532,7 +537,7 @@ public class HomePage extends Page {
                     if (token != generation) return;
                     loading = false; grid.finishLoading();
                     status.setVisibility(View.VISIBLE); status.setText("推荐加载失败，请检查网络");
-                    more.setText("重试");
+                    more.setText("重试"); more.setVisibility(View.VISIBLE); more.setFocusable(true);
                 });
             }
         });

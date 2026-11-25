@@ -240,8 +240,16 @@ public final class Session {
         return profile;
     }
 
-    public static synchronized void setProfileIfCurrent(Profile p, long expected) {
-        if (generation == expected) setProfile(p);
+    public static void setProfileIfCurrent(Profile p, long expected) {
+        boolean updated = false;
+        synchronized (Session.class) {
+            if (generation == expected) {
+                profile = p;
+                App.prefs().edit().putString(KEY_PROFILE, p.toJson().toString()).apply();
+                updated = true;
+            }
+        }
+        if (updated) notifyChanged();
     }
 
     public static void setProfile(Profile p) {

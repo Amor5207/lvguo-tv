@@ -35,7 +35,16 @@
   LV.dropCache = () => memo.clear();
   LV.api = function (path, opt) {
     opt = opt || {};
-    if (opt.body) memo.clear();
+    if (opt.body) {
+      if (path === '/api/progress') {
+        var pid = opt.body.id ? String(opt.body.id) : '';
+        memo.forEach(function (_, k) {
+          if (k.indexOf('/api/history?') === 0 || (pid && k.indexOf('/api/detail?') === 0 && k.indexOf(pid) >= 0)) memo.delete(k);
+        });
+      } else {
+        memo.clear();
+      }
+    }
     if (opt.body || !opt.ttl) return rawApi(path, opt);
     var key = path + '?' + JSON.stringify(opt.query || {}), hit = memo.get(key);
     if (hit && Date.now() - hit.t < opt.ttl) return hit.p;
@@ -186,16 +195,16 @@
   // ------------------------------------------------------------ 弹幕（取自本集真实评论，按集时长铺开）
   LV.Danmaku = function (layer) {
     this.raw = [];
-    var items = [], next = 0, lanes = [], live = [], playing = false, cfg = { on: true, op: 0.85, speed: 1, size: 1, area: 1 };
+    var items = [], next = 0, lanes = [], live = [], playing = false, fetchGen = 0, cfg = { on: true, op: 0.85, speed: 1, size: 1, area: 1 };
     var self = this;
     this.config = (c) => { Object.assign(cfg, c); layer.style.opacity = cfg.on ? cfg.op : 0; layer.style.visibility = cfg.on ? 'visible' : 'hidden'; };
     this.load = function (list, duration) {
-      this.clear();
+      items = []; next = 0; live.forEach((a) => { a.el.remove(); }); live = []; lanes = []; layer.innerHTML = '';
       list = (list || []).filter((x) => x.text && x.text.length <= 40);
       var d = Math.max(30, duration || 120);
       items = list.map((x, i) => ({ t: (i + 0.5) * d / Math.max(1, list.length) * 0.96, text: x.text, avatar: x.avatar }));
     };
-    this.clear = function () { items = []; next = 0; live.forEach((a) => { a.el.remove(); }); live = []; lanes = []; layer.innerHTML = ''; };
+    this.clear = function () { fetchGen++; items = []; next = 0; live.forEach((a) => { a.el.remove(); }); live = []; lanes = []; layer.innerHTML = ''; };
     this.seek = function (t) { next = items.findIndex((x) => x.t >= t); if (next < 0) next = items.length; live.forEach((a) => a.el.remove()); live = []; lanes = []; };
     this.setPlaying = function (p) { playing = p; live.forEach((a) => (p ? a.anim.play() : a.anim.pause())); };
     this.tick = function (t) {
@@ -223,14 +232,17 @@
     }
     /** 拉取本集评论（最多 5 页）作为弹幕 */
     this.fetch = async function (seriesId, episodeVid, duration) {
-      var all = [];
+      var gen = ++fetchGen, all = [];
       for (var p = 0; p < 5; p++) {
+        if (gen !== fetchGen) return 0;
         try {
           var r = await LV.api('/api/comments', { query: { id: seriesId, ep: episodeVid, offset: p * 20 } });
+          if (gen !== fetchGen) return 0;
           if (!r.items || !r.items.length) break;
           all = all.concat(r.items);
         } catch (e) { break; }
       }
+      if (gen !== fetchGen) return 0;
       self.raw = all;
       self.load(all, duration);
       return all.length;
@@ -248,7 +260,7 @@
       var pos = Math.round(cur.pos() * 1000);
       if (!Number.isFinite(pos)) return queue;
       if (Math.abs(pos - last) < 1000 && !(final && !cur.finalSent)) return queue;
-      var now = Date.now(), wait = 3000 - (now - sentAt);
+      var now = Date.now(), wait = final ? 0 : 3000 - (now - sentAt);
       if (wait > 0) { clearTimeout(pend); var c = cur; pend = setTimeout(function () { if (cur === c) send(final); }, wait); return queue; }
       last = pos; sentAt = now; cur.finalSent = !!final;
       var body = { id: cur.id, vid: cur.vid, index: cur.index, pos: Math.max(0, pos), final: !!final };
@@ -322,12 +334,13 @@
       if (alive && gen === generation) polling = setTimeout(() => poll(gen), 1600);
     }
     refresh.onclick = start;
-    var stop = () => { alive = false; generation++; img.onload = img.onerror = null; clearTimeout(polling); clearInterval(tick); };
+    var esc = null;
+    var stop = () => { alive = false; generation++; img.onload = img.onerror = null; clearTimeout(polling); clearInterval(tick); if (esc) { document.removeEventListener('keydown', esc); esc = null; } };
     var cb = $('.lclose', host);
     var close = () => { var l = $('.login', host); stop(); if (!l) return onClose(); l.classList.add('out'); setTimeout(() => { host.innerHTML = ''; }, 260); onClose(); };
     if (cb) cb.onclick = close;
     var lg = $('.login', host);
-    if (onClose && lg) { lg.addEventListener('mousedown', (e) => { if (e.target === lg) close(); }); var esc = (e) => { if (e.key === 'Escape' && host.firstChild) { close(); document.removeEventListener('keydown', esc); } }; document.addEventListener('keydown', esc); }
+    if (onClose && lg) { lg.addEventListener('mousedown', (e) => { if (e.target === lg) close(); }); esc = (e) => { if (e.key === 'Escape' && host.firstChild) close(); }; document.addEventListener('keydown', esc); }
     start();
     return stop;
   };

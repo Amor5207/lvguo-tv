@@ -253,11 +253,15 @@ func (c *Content) page(cookie, typ, board, filter string, offset int, session st
 	return p, sel, nil
 }
 
-// Rank 榜单一页。前几页是公共高频数据（首页主视觉、首页热播榜、榜单首屏），短缓存避免重复请求上游。
+// Rank 榜单一页。首屏（offset=0）是公共高频数据，短缓存避免重复请求上游；后续页按 session 隔离防止跨会话混页。
 func (c *Content) Rank(cookie, board string, offset int, session string) (*Page, error) {
 	cacheKey := ""
-	if offset >= 0 && offset <= 30 {
-		cacheKey = "rank:" + board + ":" + strconv.Itoa(offset)
+	if offset == 0 {
+		cacheKey = "rank:" + board + ":0"
+	} else if offset > 0 && offset <= 30 && session != "" {
+		cacheKey = "rank:" + board + ":" + strconv.Itoa(offset) + ":" + session
+	}
+	if cacheKey != "" {
 		if v, ok := c.get(cacheKey); ok {
 			cp := *(v.(*Page))
 			cp.Items = append([]Series(nil), cp.Items...)
@@ -294,7 +298,7 @@ var feedLabels = [][2]string{{"16", "推荐"}, {"36", "漫剧"}, {"39", "真人�
 
 // FeedChannels 返回当前账号实际开放的推荐频道（红果按账号下发，不是每个账号都有全部频道）。结果缓存 30 分钟。
 func (c *Content) FeedChannels(a *Account) []FeedChannel {
-	key := "feedch:" + a.U.Jar["sessionid"]
+	key := "feedch:" + a.U.CacheKey()
 	if v, ok := c.get(key); ok {
 		return v.([]FeedChannel)
 	}
@@ -1981,17 +1985,21 @@ func (c *Content) webSearch(query string, page int) (*SearchResult, error) {
 			collect(v, &r.Items, seen)
 		}
 	}
-	// 未知词时上游会返回泛推荐：要求标题含关键词才接受
-	key := strings.ToLower(strings.ReplaceAll(query, " ", ""))
-	hit := false
-	for _, s := range r.Items {
-		if strings.Contains(strings.ToLower(strings.ReplaceAll(s.Title, " ", "")), key) {
-			hit = true
-			break
+	// 未知词时上游第 1 页会返回泛推荐：仅在首页且标题与简介均不含关键词时过滤，避免误杀演员搜索与后续翻页
+	if page == 1 && len(r.Items) > 0 {
+		key := strings.ToLower(strings.ReplaceAll(query, " ", ""))
+		hit := false
+		for _, s := range r.Items {
+			title := strings.ToLower(strings.ReplaceAll(s.Title, " ", ""))
+			intro := strings.ToLower(strings.ReplaceAll(s.Intro, " ", ""))
+			if strings.Contains(title, key) || strings.Contains(intro, key) {
+				hit = true
+				break
+			}
 		}
-	}
-	if !hit {
-		r.Items, r.Total, r.More = []Series{}, 0, false
+		if !hit {
+			r.Items, r.Total, r.More = []Series{}, 0, false
+		}
 	}
 	return r, nil
 }

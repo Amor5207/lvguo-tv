@@ -321,12 +321,15 @@ public class DetailPage extends Page {
         mDetail = null;
         mDegraded = false;
         mLoading = false;
+        mReserved = false;
         mSeasonRequestAlbum = null;
         mSeasonRequestPending = false;
         mSeasonRequestResolved = false;
         mContinueIndex = 0;
         mTitle.setText(mFallbackTitle == null ? "" : mFallbackTitle);
         mPlayBtn.setText("开始播放");
+        mPlayBtn.setVisibility(View.VISIBLE);
+        if (mReserveBtn != null) mReserveBtn.setVisibility(View.GONE);
         mIntro.setText("");
         mIntro.setVisibility(View.VISIBLE);
         mActors.setText("");
@@ -564,13 +567,13 @@ public class DetailPage extends Page {
         updateReserveState();
     }
 
-    /** 未上线的剧/季 → 显示「预约」替代「开始播放」；上线的隐藏预约、显示播放。 */
+    /** 未上线的剧/季 → 显示「预约」替代「开始播放」；上线或降级可播的隐藏预约、显示播放。 */
     private void updateReserveState() {
-        boolean online = mDetail != null && !mDetail.episodes.isEmpty();
+        boolean playable = (mDetail != null && !mDetail.episodes.isEmpty()) || (mDegraded && firstVid() != null);
         if (mReserveBtn == null || mPlayBtn == null) return;
-        mPlayBtn.setVisibility(online ? View.VISIBLE : View.GONE);
-        mReserveBtn.setVisibility(online ? View.GONE : View.VISIBLE);
-        if (!online) {
+        mPlayBtn.setVisibility(playable ? View.VISIBLE : View.GONE);
+        mReserveBtn.setVisibility(playable ? View.GONE : View.VISIBLE);
+        if (!playable) {
             applyReserveLabel();
             if (!mReserveBtn.hasFocus() && !mPlayBtn.hasFocus()) mReserveBtn.post(mReserveBtn::requestFocus);
             // 后台回读是否已预约（只有未上线时才查，不拖慢正常详情）

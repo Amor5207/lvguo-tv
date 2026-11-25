@@ -637,10 +637,12 @@
     var swapButton = $('#fy-swap', root), swapping = false;
     async function swapBatch() {
       if (swapping || !root.isConnected) return;
+      var targetCh = curCh, startGen = feedGen;
       swapping = true; swapButton.disabled = true; swapButton.classList.add('busy');
       try {
         // Start a new upstream feed session and keep paging until it yields a fresh batch.
-        var first = await api('/api/foryou', { query: { channel: curCh, offset: 0 } });
+        var first = await api('/api/foryou', { query: { channel: targetCh, offset: 0 } });
+        if (!root.isConnected || curCh !== targetCh || feedGen !== startGen) return;
         var rows = [], local = {}, page = first.page, cell = first.cell, session = first.session;
         function addFresh(items) {
           (items || []).forEach(function (s) {
@@ -650,18 +652,23 @@
         addFresh(page.items);
         var tries = 0;
         while (rows.length < Math.max(12, cols() * 2) && page.more && tries++ < 8) {
-          var nextPage = await api('/api/foryou', { query: { channel: curCh, offset: page.next, cell: cell, session: session } });
+          var nextPage = await api('/api/foryou', { query: { channel: targetCh, offset: page.next, cell: cell, session: session } });
+          if (!root.isConnected || curCh !== targetCh || feedGen !== startGen) return;
           page = nextPage.page; cell = nextPage.cell; session = nextPage.session;
           addFresh(page.items);
         }
-        if (!root.isConnected) return;
+        if (!root.isConnected || curCh !== targetCh || feedGen !== startGen) return;
         if (!rows.length) { LV.toast('暂时没有更多新推荐'); return; }
         // Invalidate an in-flight old infinite-scroll request before replacing its grid.
         feedGen++; if (inf) inf.stop();
         remember(rows); rows.forEach(function (s) { seenReco[s.id] = 1; });
         fy.innerHTML = rows.map(function (s, i) { return card(s, { i: i }); }).join('');
-        persist('home', rows.map(slim));
-        startFeed(curCh, { items: rows, next: page.next, more: page.more, cell: cell, session: session });
+        if (targetCh === '16') {
+          shown = rows.slice();
+          persist('home', rows.slice(0, Math.max(24, cols() * 3)).map(slim));
+        }
+        chCache[targetCh] = { page: { items: rows.slice(), next: page.next, more: page.more }, cell: cell, session: session };
+        startFeed(targetCh, { items: rows, next: page.next, more: page.more, cell: cell, session: session });
       } catch (e) { LV.toast(e.message || '换一批失败'); }
       finally { swapping = false; swapButton.disabled = false; swapButton.classList.remove('busy'); }
     }
@@ -674,7 +681,7 @@
     title('榜单');
     var root = mount(head('榜单') + '<div class="filters" id="rty"></div><div class="bar2 ranktabs"><div class="seg sk">' + '<div class="skel" style="width:64px;height:22px;border-radius:8px;flex:none;margin:9px 14px"></div>'.repeat(8) + '</div></div><div id="rc"><div class="grid">' + gridSk(3) + '</div></div>');
     var bl, types = [], type = 'all';
-    try { var o0 = await api('/api/category/options', { query: { type: 'all' }, ttl: 600000 }); bl = o0.boards; types = o0.types || []; } catch (e) { return $('#rc', root).innerHTML = failed(e.message); }
+    try { var o0 = await api('/api/category/options', { query: { type: 'all' }, ttl: 600000 }); if (!root.isConnected) return; bl = o0.boards; types = o0.types || []; } catch (e) { if (root.isConnected) $('#rc', root).innerHTML = failed(e.message); return; }
     var cur = new URLSearchParams(location.search).get('board') || bl[0].id, inf = null;
     if (!bl.some(function (b) { return b.id === cur; })) cur = bl[0].id;
     function drawBoards() { $('.bar2', root).innerHTML = seg(bl.map(function (b) { return [b.id, b.label]; }), cur, 'data-b'); placeSeg(root); }
@@ -688,7 +695,8 @@
     $('#rty', root).addEventListener('click', async function (e) {
       var b = e.target.closest('[data-t]'); if (!b || b.dataset.t === type) return;
       var want = b.dataset.t; type = want; drawTypes();
-      try { var o = await api('/api/category/options', { query: { type: want }, ttl: 600000 }); if (type !== want) return; var ob = (o.boards || []).filter(function (x) { return want === 'all' || !/_hot_(sc|rank)$/.test(x.id); }); if (ob.length) bl = ob; } catch (er) { LV.toast(er.message); }
+      try { var o = await api('/api/category/options', { query: { type: want }, ttl: 600000 }); if (type !== want || !root.isConnected) return; var ob = (o.boards || []).filter(function (x) { return want === 'all' || !/_hot_(sc|rank)$/.test(x.id); }); if (ob.length) bl = ob; } catch (er) { if (type !== want || !root.isConnected) return; LV.toast(er.message); }
+      if (type !== want || !root.isConnected) return;
       if (!bl.some(function (x) { return x.id === cur; })) cur = bl[0].id;
       drawBoards(); load(cur);
     });
@@ -752,12 +760,15 @@
       inf = LV.infinite($('#sent', root), async function () {
         var r = await api('/api/category', { query: { type: st.type, board: st.board, offset: off, session: sess, sel: sel } }); if (tok !== JSON.stringify(st)) return false;
         remember(r.items); var h = '', k = 0; r.items.forEach(function (s) { if (!seen[s.id]) { seen[s.id] = 1; h += card(s, { i: k++ }); } });
-        if (first) { g.innerHTML = ''; first = false; if (!h && !r.more) { g.outerHTML = '<div id="g">' + empty('grid', '没有符合条件的剧', '换个条件试试') + '</div>'; return false; } ready(); }
-        g.insertAdjacentHTML('beforeend', h); off = r.next; sess = r.session; return !!r.more;
+        if (first) { g.innerHTML = ''; first = false; ready(); }
+        if (h) g.insertAdjacentHTML('beforeend', h);
+        if (!r.more && !Object.keys(seen).length) { g.outerHTML = '<div id="g">' + empty('grid', '没有符合条件的剧', '换个条件试试') + '</div>'; return false; }
+        off = r.next; sess = r.session; return !!r.more;
       }, { host: g, skel: cardSk });
       cleanups.push(inf.stop);
     }
-    async function apply() { try { await loadOpts(); loadGrid(); } catch (er) { LV.toast(er.message); } }
+    var applyGen = 0;
+    async function apply() { var gen = ++applyGen; try { await loadOpts(); if (gen !== applyGen || !root.isConnected) return; loadGrid(); } catch (er) { if (gen === applyGen && root.isConnected) LV.toast(er.message); } }
     root.addEventListener('click', function (e) {
       var t = e.target.closest('[data-t]'), b = e.target.closest('[data-bd]'), c = e.target.closest('[data-g]');
       if (t && t.dataset.t !== st.type) { st.type = t.dataset.t; st.board = ''; st.sel = {}; apply(); }
@@ -819,16 +830,22 @@
       body.scrollTop = 0;
       body.innerHTML = '<div class="sugs" id="sugs"></div><div class="slist2" id="res">' + srSk(5) + '</div>';
       api('/api/suggest', { query: { q: q }, ttl: 300000 }).then(function (r) { if (t !== me2.tok) return; var el = $('#sugs', body); if (el) el.innerHTML = (r.items || []).filter(function (x) { return x !== q; }).slice(0, 6).map(function (x) { return '<button type="button" class="chip" data-q="' + esc(x) + '">' + hl(x, q) + '</button>'; }).join(''); }).catch(function () {});
-      page = 1; more(q, t);
+      page = 1; me2.seen = {}; more(q, t);
     }
     function more(q, t) {
-      api('/api/search', { query: { q: q, page: page }, ttl: TTL }).then(function (r) {
+      var curPage = page;
+      api('/api/search', { query: { q: q, page: curPage }, ttl: TTL }).then(function (r) {
         if (t !== me2.tok) return; remember(r.items); var el = $('#res', body); if (!el) return;
-        if (page === 1) el.innerHTML = r.items.length ? '' : '<div class="snone">没有找到“' + esc(q) + '”相关的剧</div>';
+        var list = (r.items || []).filter(function (s) { if (!s || !s.id || me2.seen[s.id]) return false; me2.seen[s.id] = 1; return true; });
+        if (curPage === 1) el.innerHTML = list.length ? '' : '<div class="snone">没有找到“' + esc(q) + '”相关的剧</div>';
         var m = $('.smore', el); if (m) m.remove();
-        el.insertAdjacentHTML('beforeend', r.items.map(function (s) { return srow(s, null, q); }).join('') + (r.more ? '<button type="button" class="smore" data-more>加载更多</button>' : ''));
-        page++;
-      }).catch(function (e) { var el = $('#res', body); if (el && t === me2.tok) el.innerHTML = '<div class="snone">' + esc(e.message) + '</div>'; });
+        el.insertAdjacentHTML('beforeend', list.map(function (s) { return srow(s, null, q); }).join('') + (r.more ? '<button type="button" class="smore" data-more>加载更多</button>' : ''));
+        page = curPage + 1;
+      }).catch(function (e) {
+        var el = $('#res', body); if (!el || t !== me2.tok) return;
+        if (curPage === 1) el.innerHTML = '<div class="snone">' + esc(e.message) + '</div>';
+        else { var m = $('.smore', el); if (m) { m.disabled = false; m.textContent = '加载更多'; } LV.toast(e.message || '加载失败，请重试'); }
+      });
     }
     var live = LV.debounce(function () { run(inp.value, false); }, 280);
     // 拼音输入法组字过程中不搜（会拿半截拼音去搜），上屏后再搜
@@ -1112,8 +1129,11 @@
       else if (isHist) await api('/api/history/delete', { body: { id: id } }); else await api('/api/favorite', { body: { id: id, add: false } });
       c.style.transition = 'transform .45s var(--ease),opacity .3s'; c.style.transform = 'scale(.85)'; c.style.opacity = 0;
       setTimeout(function () { var row = c.parentNode; c.remove(); if (row && row.classList.contains('row')) arrState(row); }, 360);
-      hist = hist.filter(function (h) { return h.seriesId !== id; });
-      saveCachedHist();
+      if (isHist) {
+        hist = hist.filter(function (h) { return h.seriesId !== id; });
+        recentPlayback.delete(id);
+        saveCachedHist();
+      }
       if (mineRemoved) setTimeout(function () { if (mineRemoved) mineRemoved(id, isHist); }, 380);
       LV.toast(isHist ? '已删除' : '已取消收藏');
     } catch (e) { LV.toast(e.message); }
@@ -1220,6 +1240,7 @@
     fetchDetail();
   }
 
+  var lastFeedFirstId = '';
   function feedPage() {
     if (PL) return;
     title('刷剧'); closeMenu();
@@ -1227,11 +1248,21 @@
     var el = $('#player'); el.hidden = false; el.className = 'feed';
     el.innerHTML = '<div class="pload"><i></i><span>正在加载</span></div>';
     var aborted = false, items = [], seen = {}, src = 'fy', ch = '16', next = 0, cell = '', sess = '', more = true, dry = 0, pending = null, bq = null, bi = 0, boff = 0, bsess = '';
-    // 复用首页已缓存的推荐列表作为首屏种子，省掉进入 /feed 后串行干等 /api/foryou 的 1.5~2s。
+    // 复用首页已缓存的推荐列表作为首屏种子（先洗牌并避开上次首部），省掉首帧等待，同时后台立即拉一页 /api/foryou 插到第 2 位。
     var seedHome = persist('home');
     if (Array.isArray(seedHome) && seedHome.length) {
-      seedHome.forEach(function (s) { if (s && s.id && !seen[s.id]) { seen[s.id] = 1; items.push(s); } });
+      var pool = [];
+      seedHome.forEach(function (s) { if (s && s.id && !seen[s.id]) { seen[s.id] = 1; pool.push(s); } });
+      for (var si = pool.length - 1; si > 0; si--) {
+        var sj = Math.floor(Math.random() * (si + 1));
+        var tmp = pool[si]; pool[si] = pool[sj]; pool[sj] = tmp;
+      }
+      if (pool.length > 1 && pool[0].id === lastFeedFirstId) {
+        var swap = pool[0]; pool[0] = pool[1]; pool[1] = swap;
+      }
+      pool.forEach(function (s) { items.push(s); });
     }
+    var seedCount = items.length, promoted = false, bootIndex = 0;
     function fetchMore() {
       if (pending) return pending;
       if (!more) return Promise.resolve();
@@ -1289,8 +1320,18 @@
       if (PL && PL.feed === feedCtrl && PL.close) PL.close(true);
       else if (!PL && !OPENING) { el.hidden = true; el.innerHTML = ''; el.className = ''; }
     });
+    function promoteFresh() {
+      if (promoted || aborted || !seedCount || feedCtrl.index > bootIndex) return;
+      var fresh = items.slice(seedCount);
+      if (!fresh.length) return;
+      promoted = true;
+      items.length = seedCount;
+      items.splice.apply(items, [bootIndex + 1, 0].concat(fresh));
+      feedCtrl.prefetchAhead(feedCtrl.index);
+    }
     async function boot() {
       try {
+        if (seedCount) fetchMore().then(promoteFresh, function () {});
         while (!items.length && more && !aborted) await fetchMore();
         if (aborted) return;
         var lastErr = null;
@@ -1302,7 +1343,10 @@
           if (aborted) return;
           if (r && r.detail && r.detail.episodes && r.detail.episodes.length) {
             r.detail.favorite = !!r.favorite;
+            bootIndex = k;
             feedCtrl.index = k;
+            lastFeedFirstId = s.id;
+            promoteFresh();
             var p = latestProgress(r.detail.id, r.progress);
             openPlayer(r.detail, p ? p.episodeIndex : 0, p ? p.positionMs : 0, true, feedCtrl);
             return;
@@ -1531,9 +1575,10 @@
         return warm.promise;
       }).catch(function () {});
     }
-    async function feedSwitch(targetIdx, dir) {
+    async function feedSwitch(targetIdx, dir, skipped) {
       if (!feed || PL !== S) return;
       if (targetIdx < 0) return LV.toast('已经是第一部');
+      skipped = skipped || 0;
       var navToken = ++S.feedNavToken;
       var item = await feed.itemAt(targetIdx);
       if (PL !== S || navToken !== S.feedNavToken) return;
@@ -1561,7 +1606,14 @@
           }
         } catch (e) {
           if (warm) disposeFeedWarm(warm);
-          if (PL === S && navToken === S.feedNavToken) LV.toast((e && e.message) || '加载失败，请重试');
+          if (PL === S && navToken === S.feedNavToken) {
+            var stepDir = dir < 0 ? -1 : 1;
+            if (skipped < 4 && (targetIdx + stepDir >= 0)) {
+              return feedSwitch(targetIdx + stepDir, stepDir, skipped + 1);
+            }
+            S.feedIdx = targetIdx; feed.index = targetIdx;
+            LV.toast((e && e.message) || '加载失败，请重试');
+          }
           return;
         }
       }
@@ -1722,9 +1774,11 @@
         S.recovery = { attempts: 0, timer: null, stable: null, stall: null };
         S.activeQuality = S.quality;
       } else if (options.quality) S.activeQuality = options.quality;
-      if (S.loaded && !LV.get('keepRate')) { LV.set('rate', 1); syncRateUI(); }
+      var ep = d.episodes[i];
+      // 仅在真正切换集数/剧集时重置倍速，同集重试/切清晰度/自动恢复保留当前倍速
+      if (S.loaded && S.gearVid !== ep.vid && !LV.get('keepRate')) { LV.set('rate', 1); syncRateUI(); }
       var first = !S.loaded; S.loaded = true;
-      rep.stop(); S.report = null; S.reportStarted = false; var tk = ++S.token; S.i = i; S.gi = null; S.cmN = 30; var ep = d.episodes[i];
+      rep.stop(); S.report = null; S.reportStarted = false; var tk = ++S.token; S.i = i; S.gi = null; S.cmN = 30;
       // 选新集后不能用上一集的档位列表做恢复；/api/play 的 q 只选清晰度，
       // 上游取源失败时换 q 不会让同一集更容易取到源。
       if (S.gearVid !== ep.vid) { S.gearVid = ep.vid; S.gears = []; S.def = ''; }
@@ -1818,7 +1872,7 @@
         return;
       }
       recovery.attempts++;
-      var current = v && isFinite(v.currentTime) ? v.currentTime : S.start || 0;
+      var current = (v && isFinite(v.currentTime) && v.currentTime > 0) ? v.currentTime : (S.start || 0);
       var gears = (S.gears || []).filter(function (g) { return g && g.definition && +g.short > 0 && !/bvc2|bytevc2/i.test(g.codec || ''); })
         .sort(function (a, b) { return +b.short - +a.short; });
       var currentGear = gears.find(function (g) { return g.definition === S.activeQuality; });
@@ -2007,8 +2061,20 @@
       prog.setPointerCapture(ev.pointerId); prog.classList.add('drag');
       var mv = function (e) { var p = posOf(e); fill.style.width = p * 100 + '%'; knob.style.left = p * 100 + '%'; tip.style.left = p * 100 + '%'; tip.textContent = LV.time(p * (v.duration || 0)); S.seekTo = p; };
       mv(ev);
-      var up = function () { prog.classList.remove('drag'); prog.removeEventListener('pointermove', mv); prog.removeEventListener('pointerup', up); if (v.duration) v.currentTime = S.seekTo * v.duration; };
-      prog.addEventListener('pointermove', mv); prog.addEventListener('pointerup', up);
+      var end = function (commit) {
+        prog.classList.remove('drag');
+        prog.removeEventListener('pointermove', mv);
+        prog.removeEventListener('pointerup', onUp);
+        prog.removeEventListener('pointercancel', onCancel);
+        prog.removeEventListener('lostpointercapture', onCancel);
+        if (commit && v.duration) v.currentTime = S.seekTo * v.duration;
+      };
+      var onUp = function () { end(true); };
+      var onCancel = function () { end(false); };
+      prog.addEventListener('pointermove', mv);
+      prog.addEventListener('pointerup', onUp);
+      prog.addEventListener('pointercancel', onCancel);
+      prog.addEventListener('lostpointercapture', onCancel);
     });
     function popAt(m, kind, extra) {
       var btn = $('[data-a=' + kind + ']', el), r = btn.getBoundingClientRect();
@@ -2107,7 +2173,7 @@
         case 'vol': return volPanel();
         case 'mute': v.muted = !v.muted; LV.set('muted', v.muted); volIcon(); LV.toast(v.muted ? '已静音' : '音量 ' + Math.round(v.volume * 100) + '%'); break;
         case 'full': closePm(); if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(function () {}); else if (el.requestFullscreen) el.requestFullscreen().catch(function () { if (v && v.webkitEnterFullscreen) v.webkitEnterFullscreen(); }); else if (v && v.webkitEnterFullscreen) v.webkitEnterFullscreen(); break;   // iPhone 只支持视频元素自身全屏
-        case 'retry': closePm(); load(S.i, v && v.currentTime || 0, 0); break;
+        case 'retry': closePm(); load(S.i, (v && v.currentTime > 0 ? v.currentTime : S.start) || 0, 0); break;
         case 'cancelnext': clearTimeout(S.nextT); var u = $('.upnext', el); if (u) u.remove(); break;
         case 'dock': closePm(); var o2 = !el.classList.contains('dock-on'); el.classList.toggle('dock-on', o2); if (!feed) LV.set('dock', o2); if (o2) drawDock(); break;
         case 'dmset': return dmPanel();
@@ -2117,13 +2183,16 @@
           var rsw = $('.pmenu[data-k=rate] .pm-opt .sw', el); if (rsw) rsw.classList.toggle('on', nextLock);
           LV.toast(nextLock ? '已锁定倍速' : '已取消锁定倍速');
           break;
-        case 'quality': if (!S.gears.length) return; return pmenu('quality', S.gears.map(function (g) { return [g.definition, g.definition, g.definition === S.def]; }).reverse(), function (q) { S.quality = q; LV.set('quality', q); dropPre();dropNextSeason();dropFeedWarms(); load(S.i, v.currentTime || 0, 0); });
+        case 'quality': if (!S.gears.length) return; return pmenu('quality', S.gears.map(function (g) { return [g.definition, g.definition, g.definition === S.def]; }).reverse(), function (q) { S.quality = q; LV.set('quality', q); dropPre();dropNextSeason();dropFeedWarms(); load(S.i, (v && v.currentTime > 0 ? v.currentTime : S.start) || 0, 0); });
       }
     }
+    var ac = new AbortController(), sig = { signal: ac.signal };
     el.addEventListener('pointerdown', function (e) {
+      if (PL !== S) return;
       if (e.target.closest('.pbot,.ptop,.pmenu,.dock,.fd-nav')) showUI();
-    });
+    }, sig);
     el.addEventListener('click', function (e) {
+      if (PL !== S) return;
       if (e.target.closest('.pbot,.ptop,.pmenu,.dock,.fd-nav')) showUI();
       var b = e.target.closest('[data-a]'); if (b) { e.stopPropagation(); return act(b.dataset.a); }
       if (e.target.closest('.dock,.pbot,.ptop,.pmenu,.upnext,.perr,.mid,.fd-nav')) { if (!e.target.closest('.pmenu')) closePm(); return; }
@@ -2131,28 +2200,29 @@
       // 触屏：点画面只呼出 / 收起控件（播放暂停用中间按钮），和手机视频 App 一致
       if (TOUCH) { if (el.classList.contains('dock-on')) { el.classList.remove('dock-on'); if (!feed) LV.set('dock', false); return; } if (el.classList.contains('idle') || (v && v.paused)) showUI(); else { clearTimeout(S.idle); el.classList.add('idle'); } return; }
       clearTimeout(S.ck); S.ck = setTimeout(function () { act('toggle'); }, 220);
-    });
+    }, sig);
     // 触屏：画面上下滑切集/切剧，抽屉把手下滑收起
     var sw = null;
-    el.addEventListener('touchstart', function (e) { if (e.touches.length !== 1) { sw = null; return; } var t = e.touches[0]; sw = { x: t.clientX, y: t.clientY, at: Date.now(), dock: !!e.target.closest('.dh'), skip: !!e.target.closest('.dock:not(.dh),.pbot,.pmenu,.perr,.upnext,.fd-nav') && !e.target.closest('.dh') }; }, { passive: true });
+    el.addEventListener('touchstart', function (e) { if (PL !== S) return; if (e.touches.length !== 1) { sw = null; return; } var t = e.touches[0]; sw = { x: t.clientX, y: t.clientY, at: Date.now(), dock: !!e.target.closest('.dh'), skip: !!e.target.closest('.dock:not(.dh),.pbot,.pmenu,.perr,.upnext,.fd-nav') && !e.target.closest('.dh') }; }, { passive: true, signal: ac.signal });
     el.addEventListener('touchend', function (e) {
-      if (!sw || sw.skip) return; var t = e.changedTouches[0], dx = t.clientX - sw.x, dy = t.clientY - sw.y, fast = Date.now() - sw.at < 600; var s0 = sw; sw = null;
+      if (PL !== S || !sw || sw.skip) return; var t = e.changedTouches[0], dx = t.clientX - sw.x, dy = t.clientY - sw.y, fast = Date.now() - sw.at < 600; var s0 = sw; sw = null;
       if (!fast || Math.abs(dy) < 70 || Math.abs(dy) < Math.abs(dx) * 1.5) return;
       if (s0.dock) { if (dy > 0) { el.classList.remove('dock-on'); if (!feed) LV.set('dock', false); } return; }
       if (el.classList.contains('dock-on')) return;
       clearTimeout(S.ck);
       if (feed) feedStep(dy < 0 ? 1 : -1); else step(dy < 0 ? 1 : -1);
-    }, { passive: true });
-    el.addEventListener('dblclick', function (e) { if (!e.target.closest('.dock,.pbot,.ptop,.pmenu,.mid,.fd-nav')) { clearTimeout(S.ck); act('full'); } });
+    }, { passive: true, signal: ac.signal });
+    el.addEventListener('dblclick', function (e) { if (PL === S && !e.target.closest('.dock,.pbot,.ptop,.pmenu,.mid,.fd-nav')) { clearTimeout(S.ck); act('full'); } }, sig);
     var lastPointerX = null, lastPointerY = null;
     el.addEventListener('pointermove', function (e) {
-      if (e.pointerType !== 'mouse' || (e.clientX === lastPointerX && e.clientY === lastPointerY)) return;
+      if (PL !== S || e.pointerType !== 'mouse' || (e.clientX === lastPointerX && e.clientY === lastPointerY)) return;
       lastPointerX = e.clientX; lastPointerY = e.clientY; showUI();
-    });
+    }, sig);
     showUI();   // 开播后没动过鼠标/没点过画面，控件也按时自动隐藏   // 触屏点击会补发模拟 mousemove，不能当成「呼出控件」
     // 滚轮切集/切剧：一次手势只切一次
     var wheelLock = 0, wheelAcc = 0;
     el.addEventListener('wheel', function (e) {
+      if (PL !== S) return;
       if (!el.classList.contains('idle')) showUI();
       if (e.target.closest('.dock,.pmenu')) return;
       e.preventDefault(); var now = Date.now();
@@ -2162,9 +2232,9 @@
         if (feed) feedStep(wheelAcc > 0 ? 1 : -1); else step(wheelAcc > 0 ? 1 : -1);
         wheelAcc = 0; wheelLock = now + 700;
       }
-    }, { passive: false });
+    }, { passive: false, signal: ac.signal });
     function key(e) {
-      if (!PL || (/INPUT|SELECT|TEXTAREA/.test(e.target.tagName) && e.target.type !== 'range')) return;
+      if (PL !== S || (/INPUT|SELECT|TEXTAREA/.test(e.target.tagName) && e.target.type !== 'range')) return;
       var k = e.key, epKey = k === 'ArrowUp' || k === 'ArrowDown' || k === 'n' || k === 'N' || k === 'p' || k === 'P';
       if (!epKey || !el.classList.contains('idle')) showUI();
       if (k === ' ' || k === 'k' || k === 'K') { e.preventDefault(); act('toggle'); }
@@ -2181,14 +2251,14 @@
         else closePlayer();
       }
     }
-    document.addEventListener('keydown', key);
-    function onFs() { closePm(); el.classList.toggle('full', document.fullscreenElement === el); }
-    document.addEventListener('fullscreenchange', onFs);
-    window.addEventListener('resize', closePm);
-    function onPop() { if (PL && !feed) closePlayer(true); }
-    window.addEventListener('popstate', onPop);
+    document.addEventListener('keydown', key, sig);
+    function onFs() { if (PL !== S) return; closePm(); el.classList.toggle('full', document.fullscreenElement === el); }
+    document.addEventListener('fullscreenchange', onFs, sig);
+    window.addEventListener('resize', closePm, sig);
+    function onPop() { if (PL === S && !feed) closePlayer(true); }
+    window.addEventListener('popstate', onPop, sig);
     function closePlayer(fromPop) {
-      if (!PL) return; var cur = S; PL = null;
+      if (PL !== S) return; var cur = S; PL = null; ac.abort();
       cancelAnimationFrame(cur.raf); clearTimeout(cur.idle); clearTimeout(cur.nextT); clearTimeout(cur.ck); clearInterval(cur.dropT);
       clearTimeout(cur.slideTimer);
       document.removeEventListener('keydown', key); document.removeEventListener('fullscreenchange', onFs); window.removeEventListener('resize', closePm); window.removeEventListener('popstate', onPop);
