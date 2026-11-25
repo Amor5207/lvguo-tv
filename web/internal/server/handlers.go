@@ -262,20 +262,62 @@ func (s *Server) forYou(ss *sess, w http.ResponseWriter, r *http.Request) (any, 
 }
 
 func (s *Server) forYouBatch(ss *sess, ch string, offset int, cursor, session string) (*fyResult, error) {
+	const step = 6
+	type res struct {
+		p   *lvguo.Page
+		c   string
+		s   string
+		err error
+	}
+	// 已有服务端下发的 session 和栏目游标时，单轮并发取 5 页（登录态同 session 并发存在去重折损，5 页可稳出 10~18 部，单轮 RTT 不增加）。
+	if cursor != "" && session != "" {
+		offs := []int{offset, offset + step, offset + 2*step, offset + 3*step, offset + 4*step}
+		got := make([]*res, len(offs))
+		var wg sync.WaitGroup
+		for i, off := range offs {
+			wg.Add(1)
+			go func(i, off int) {
+				defer wg.Done()
+				p, c2, s2, err := s.content.ForYou(ss.acct, ch, off, cursor, session)
+				got[i] = &res{p, c2, s2, err}
+			}(i, off)
+		}
+		wg.Wait()
+		if got[0] == nil || got[0].err != nil {
+			if got[0] != nil {
+				return nil, got[0].err
+			}
+			return nil, errors.New("推荐加载失败")
+		}
+		p, cell, sessID := got[0].p, got[0].c, got[0].s
+		seen := map[string]bool{}
+		for _, it := range p.Items {
+			seen[it.ID] = true
+		}
+		for i := 1; i < len(got); i++ {
+			g := got[i]
+			if g == nil || g.err != nil || g.p == nil || !p.More || p.Next != offs[i] {
+				break
+			}
+			for _, it := range g.p.Items {
+				if !seen[it.ID] {
+					seen[it.ID] = true
+					p.Items = append(p.Items, it)
+				}
+			}
+			p.Next, p.More, cell, sessID = g.p.Next, g.p.More, g.c, g.s
+		}
+		return &fyResult{p, cell, sessID}, nil
+	}
+
 	p, cell, sessID, err := s.content.ForYou(ss.acct, ch, offset, cursor, session)
 	if err != nil {
 		return nil, err
 	}
 	// 上游一页只给 3~6 部：并行多取几页凑够整屏首屏再返回，避免切频道后立刻触发二次加载。
 	// 翻页步长取自上游（漫剧等频道固定 6），后续偏移按步长推算，只在相邻页游标吻合时采用。
-	if p.More && cell != "" && len(p.Items) < 18 {
-		const step = 6
-		type res struct {
-			p *lvguo.Page
-			c string
-			s string
-		}
-		offs := []int{p.Next, p.Next + step, p.Next + 2*step}
+	if p.More && cell != "" && len(p.Items) < 24 {
+		offs := []int{p.Next, p.Next + step, p.Next + 2*step, p.Next + 3*step}
 		got := make([]*res, len(offs))
 		var wg sync.WaitGroup
 		for i, off := range offs {
@@ -283,7 +325,7 @@ func (s *Server) forYouBatch(ss *sess, ch string, offset int, cursor, session st
 			go func(i, off int) {
 				defer wg.Done()
 				if n, c2, s2, err := s.content.ForYou(ss.acct, ch, off, cell, sessID); err == nil {
-					got[i] = &res{n, c2, s2}
+					got[i] = &res{n, c2, s2, nil}
 				}
 			}(i, off)
 		}

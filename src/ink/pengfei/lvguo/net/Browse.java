@@ -34,7 +34,8 @@ public final class Browse {
         q.put("client_req_type","2");q.put("client_template","2");q.put("screen_width_px","1350");
         q.put("selected_items",type);q.put("sub_selected_items",board);
         q.put("panel_selected_items",filter==null?"":filter);
-        q.put("offset",String.valueOf(offset));q.put("session_uuid",session==null?UUID.randomUUID().toString():session);
+        String sid = (session == null || session.isEmpty()) ? UUID.randomUUID().toString() : session;
+        q.put("offset",String.valueOf(offset));q.put("session_uuid",sid);q.put("session_id",sid);
         JSONObject root=LvguoApi.callDynamic("rank",q,null);
         JSONObject data=root.optJSONObject("data");
         JSONObject cell=data==null?null:data.optJSONObject("cell_view");

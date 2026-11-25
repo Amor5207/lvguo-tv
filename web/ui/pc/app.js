@@ -471,7 +471,7 @@
     cleanups.push(function () { window.removeEventListener('lv:history', historyChanged); window.removeEventListener('lv:progress', historyChanged); });
     if (hist.length) updateContinue(hist);
     if (BROWSE_ONLY) loadHistory(false);
-    if (cached && cached.length >= 6) paint(cached);
+    if (cached && cached.length) paint(cached);
     if (cachedHero && cachedHero.length) paintHero(cachedHero);
     else boardItems(HERO_BOARD, 5).then(function (list) {
       if (!root.isConnected || !isHomePath()) return;
@@ -506,9 +506,20 @@
     }
     if (!isHomePath() || !root.isConnected) return;
     var items = data.forYou.items || []; remember(items);
-    if (items.length) persist('home', items.map(slim));
+    // 若本地缓存已画出多行，把最新推荐合并到最前面并保持整行数量，避免刷新首页时从两三行突然缩水成 6 张
+    var homeList = items;
+    if (shown && shown.length > items.length) {
+      var seenMerge = {};
+      homeList = [];
+      items.concat(shown).forEach(function (s) {
+        if (s && s.id && !seenMerge[s.id]) { seenMerge[s.id] = 1; homeList.push(s); }
+      });
+      var c0 = cols();
+      if (homeList.length >= c0) homeList = homeList.slice(0, Math.floor(homeList.length / c0) * c0);
+    }
+    if (homeList.length) persist('home', homeList.slice(0, Math.max(24, cols() * 3)).map(slim));
     // 首页「为你推荐」可随会话更新；主视觉独立使用推荐榜持久缓存。
-    if (items.length && (!shown || shown.map(function (x) { return x.id; }).join() !== items.map(function (x) { return x.id; }).join())) paint(items);
+    if (homeList.length && (!shown || shown.map(function (x) { return x.id; }).join() !== homeList.map(function (x) { return x.id; }).join())) paint(homeList);
     remember(data.continue.map(function (c) { return { id: c.seriesId, title: c.title, cover: c.cover, episodes: c.episodeCount }; }));
     if (!BROWSE_ONLY && (LV.loggedIn || GUEST)) {
       hist = historyLoaded ? mergeRecentHistory((data.continue || []).concat(hist)) : mergeRecentHistory(data.continue || []);
@@ -554,23 +565,34 @@
       if (inf) inf.stop();
       sent.hidden = false;
       inf = LV.infinite(sent, async function () {
-        var c = cols();
-        while (buf.length < c * 2 && more && live()) await fetchPage();
+        var c = cols(), have = fy.querySelectorAll(':scope > .card:not(.sk)').length;
+        // 只要补齐当前残缺行（若已是整行则补 1 整行）就立刻渲染并撤掉骨架屏，避免宽屏下为凑两整行连等两轮请求
+        var need = (c - have % c) % c || c;
+        while (buf.length < need && more && live()) await fetchPage();
         if (!live()) return false;
-        var have = fy.querySelectorAll(':scope > .card:not(.sk)').length;
+        have = fy.querySelectorAll(':scope > .card:not(.sk)').length;
         var take = more ? Math.max(0, Math.floor((have + buf.length) / c) * c - have) : buf.length;
-        var h = buf.splice(0, take).map(function (s, k) { return card(s, { i: k }); }).join('');
-        fy.insertAdjacentHTML('beforeend', h);
+        var added = buf.splice(0, take);
+        if (added.length) {
+          var h = added.map(function (s, k) { return card(s, { i: k }); }).join('');
+          var sk = fy.querySelector(':scope > .sk-tail');
+          if (sk) sk.insertAdjacentHTML('beforebegin', h); else fy.insertAdjacentHTML('beforeend', h);
+          if (ch === '16') {
+            shown = (shown || []).concat(added);
+            if (shown.length <= Math.max(24, c * 3)) persist('home', shown.map(slim));
+            if (chCache['16']) chCache['16'] = { page: { items: shown.slice(), next: next, more: more }, cell: cell, session: sess };
+          }
+        }
         prefetch();
         return more || buf.length > 0;
       }, { host: fy, skel: cardSk });
       prefetch(); // 首屏一画完就开始预取
     }
-    var initialForYou = (shown || []).concat(items);
+    var initialForYou = (shown && shown.length ? shown : items).slice();
+    var chCache = { '16': { page: { items: initialForYou, next: data.forYou.next, more: data.forYou.more }, cell: data.cell, session: data.session } };
     startFeed('16', { items: initialForYou, next: data.forYou.next, more: data.forYou.more, cell: data.cell, session: data.session });
     // 频道切换（推荐 / 漫剧等）：预热次要频道首屏 + 本地缓存 + 凑整行展示，切频道即时出图不闪两次加载
     var chs = data.channels || [], chBox = $('#fych', root), curCh = '16';
-    var chCache = { '16': { page: { items: initialForYou, next: data.forYou.next, more: data.forYou.more }, cell: data.cell, session: data.session } };
     var chPending = {};
     function fetchChannelFirst(chId) {
       if (chCache[chId]) return Promise.resolve(chCache[chId]);
@@ -586,7 +608,7 @@
       var raw = (r && r.page && r.page.items) || [];
       remember(raw);
       var c = cols(), moreFlag = !!(r && r.page && r.page.more);
-      var drawN = (moreFlag && raw.length >= c * 2) ? Math.floor(raw.length / c) * c : raw.length;
+      var drawN = (moreFlag && raw.length >= c) ? Math.floor(raw.length / c) * c : raw.length;
       var vis = raw.slice(0, drawN), rest = raw.slice(drawN);
       fy.innerHTML = vis.map(function (s, i) { return card(s, { i: i }); }).join('') || '<div class="mempty">暂无内容</div>';
       feedGen--;   // startFeed 自己会 +1，保持与当前切换同一代
@@ -597,7 +619,7 @@
       var warmTimer = setTimeout(function () {
         if (!root.isConnected || !isHomePath() || PL || OPENING) return;
         chs.forEach(function (c) { if (c.id !== '16') fetchChannelFirst(c.id).catch(function () {}); });
-      }, 1200);
+      }, 300);
       cleanups.push(function () { clearTimeout(warmTimer); });
       chBox.addEventListener('click', function (e) {
         var b = e.target.closest('[data-ch]'); if (!b) return;

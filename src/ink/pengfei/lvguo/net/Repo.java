@@ -111,6 +111,7 @@ public final class Repo {
             q.put("selected_items", "all");
             q.put("sub_selected_items", board);
             q.put("session_uuid", session);
+            q.put("session_id", session);
             if (offset > 0) q.put("offset", String.valueOf(offset));
 
             JSONObject j = LvguoApi.callDynamic("rank", q, null);

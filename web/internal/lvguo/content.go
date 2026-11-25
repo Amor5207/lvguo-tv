@@ -226,7 +226,8 @@ func (c *Content) page(cookie, typ, board, filter string, offset int, session st
 	m, err := c.callDynamicAPI(cookie, "rank", sign.Params{
 		{K: "cell_id", V: DefaultCell}, {K: "tab_type", V: "26"}, {K: "client_req_type", V: "2"}, {K: "client_template", V: "2"},
 		{K: "screen_width_px", V: "1350"}, {K: "selected_items", V: typ}, {K: "sub_selected_items", V: board},
-		{K: "panel_selected_items", V: filter}, {K: "offset", V: strconv.Itoa(offset)}, {K: "session_uuid", V: session}}, nil)
+		{K: "panel_selected_items", V: filter}, {K: "offset", V: strconv.Itoa(offset)},
+		{K: "session_uuid", V: session}, {K: "session_id", V: session}}, nil)
 	if err != nil {
 		return nil, nil, err
 	}
