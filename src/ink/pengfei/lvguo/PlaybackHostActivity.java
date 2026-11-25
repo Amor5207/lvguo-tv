@@ -230,8 +230,7 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
         // 追剧是常用操作：直接放在工具条上；评论、连播等低频操作收进「更多」
         favoriteButton=addControl(tools,"追剧",IconView.STAR,false,this::toggleFavorite);
         if(feedMode){
-            feedFullscreenButton=addControl(tools,"全屏",IconView.EXPAND,false,()->setFeedFullscreen(!feedFullscreen));
-            for(TextView button:new TextView[]{episodeButton,speedButton,qualityButton,danmakuButton,favoriteButton,feedFullscreenButton})Ui.padding(button,10,0,12,0);
+            for(TextView button:new TextView[]{episodeButton,speedButton,qualityButton,danmakuButton,favoriteButton})Ui.padding(button,10,0,12,0);
             deck.setPadding(dp(32),dp(40),dp(32),dp(12));
         }else commentButton=addControl(tools,"更多",IconView.MORE,false,this::openPlaybackSettings);
         updateSettingsLabels();
@@ -409,7 +408,8 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
     private void applyLoadedSeries(Repo.Detail detail,int selected,String vid,int episodeNo){
         seriesDetail=detail;episodes=detail.episodes;
         if(seriesTitle==null || seriesTitle.isEmpty())seriesTitle=detail.title;
-        feedHadHistory=Store.watched(seriesId)!=null;
+        Store.Item prevWatched=Store.watched(seriesId);
+        feedHadHistory=prevWatched!=null && prevWatched.episodeIndex>=1;
         feedHistoryCommitted=!feedMode || feedHadHistory || selected>=1;
         index=selected;
         if(vid!=null && !vid.isEmpty()){
@@ -1927,7 +1927,8 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
         degraded=false;
         restorePosition=0;restorePaused=false;
         playbackIntent().putExtra(EXTRA_SERIES,seriesId).putExtra(EXTRA_TITLE,seriesTitle).putExtra(EXTRA_COVER,targetDetail.cover);
-        feedHadHistory=Store.watched(seriesId)!=null;
+        Store.Item prevWatched=Store.watched(seriesId);
+        feedHadHistory=prevWatched!=null && prevWatched.episodeIndex>=1;
         feedHistoryCommitted=!feedMode || feedHadHistory || targetEpIndex>=1;
         paintFavorite();
         playAt(Math.max(0,Math.min(targetEpIndex,episodes.size()-1)));
@@ -2135,7 +2136,6 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
     }
     private void handleBack(){
         if((feedMode || feedReturn) && !overlayOpen()){
-            if(feedFullscreen){setFeedFullscreen(false);return;}
             if(isEmbeddedPlaybackHost()){exitEmbeddedToNavigation();return;}
             if(chromeVisible){hideChrome();return;}
             focusPlaybackNavigation();return;
@@ -2721,13 +2721,14 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
     }
     private void exitEmbeddedToNavigation(){
         setFeedMask(true);
+        hideChrome();
+        if(feedFullscreen)setFeedFullscreen(false);
         focusPlaybackNavigation();
     }
     private void setFeedFullscreen(boolean fullscreen){
         if(fullscreen)setFeedMask(false);
         feedFullscreen=fullscreen;
         onPlaybackFullscreenChanged(fullscreen);
-        if(feedFullscreenButton!=null)feedFullscreenButton.setText(fullscreen?"退出全屏":"全屏");
         if(!feedMasked){
             root.requestFocus();root.post(()->{if(activeGear!=null)fitVideoSize(activeGear.width,activeGear.height);});
             showFeedInfo();
@@ -2757,6 +2758,7 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
     protected final void focusEmbeddedPlayback(){
         if(root==null)return;
         setFeedMask(false);
+        if(!feedFullscreen)setFeedFullscreen(true);
         if(errorVisible()){
             View first=errorActions==null?null:errorActions.getChildAt(0);
             if(first!=null){first.requestFocus();return;}
@@ -2768,7 +2770,7 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
         handleBack();return true;
     }
     private void exitPlayback(){
-        if(isEmbeddedPlaybackHost()){setFeedFullscreen(false);exitEmbeddedToNavigation();}
+        if(isEmbeddedPlaybackHost()){exitEmbeddedToNavigation();}
         else finish();
     }
     private void buildFeedUi(){
@@ -2833,8 +2835,6 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
         switchCover.setScaleType(feed?android.widget.ImageView.ScaleType.CENTER_CROP:android.widget.ImageView.ScaleType.FIT_CENTER);
     }
     private void paintFeedActions(){
-        if(feedLayer==null)return;
-        if(feedFullscreenButton!=null)feedFullscreenButton.setText(feedFullscreen?"退出全屏":"全屏");
     }
 
     /** 拉一页推荐；首次拉到后直接开播第一部。 */
@@ -3111,6 +3111,7 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
         }else releasePlayer();
         episodes=null;clips.clear();
         seriesId=nextSeries;seriesTitle=intent.getStringExtra(EXTRA_TITLE);
+        feedHadHistory=false;feedHistoryCommitted=!feedMode;
         paintFavorite();
         index=intent.getIntExtra(EXTRA_INDEX,0);pendingResumePosition=intent.getIntExtra("position_ms",0);seriesDetail=null;degraded=false;loadSeries();
     }

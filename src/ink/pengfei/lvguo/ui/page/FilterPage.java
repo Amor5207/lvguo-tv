@@ -127,7 +127,8 @@ public final class FilterPage extends Page {
             if(token!=generation)return;loading=false;cursor=result.next;session=result.session;hasMore=result.more;
             List<Series> add=new ArrayList<>();for(Series item:result.items)if(seen.add(item.seriesId))add.add(item);grid.append(add);grid.setLeftNavId(nav);
             emptyPages=add.isEmpty()?emptyPages+1:0;
-            status.setText(seen.isEmpty()?"暂无相关短剧":"");status.setVisibility(seen.isEmpty()?View.VISIBLE:View.GONE);more.setText(hasMore?"加载更多":"没有更多了");more.setVisibility(View.GONE);
+            boolean emptyDone=seen.isEmpty() && !hasMore;
+            status.setText(emptyDone?"暂无相关短剧":"");status.setVisibility(emptyDone?View.VISIBLE:View.GONE);more.setText(hasMore?"加载更多":"没有更多了");more.setVisibility(View.GONE);
             scroll.post(this::requestMoreIfNear);
         });}catch(Exception error){host.runOnUiThread(()->{if(token!=generation)return;loading=false;grid.finishLoading();status.setVisibility(View.VISIBLE);status.setText("加载失败");more.setText("重试");more.setVisibility(View.VISIBLE);more.setFocusable(true);});}});
     }
