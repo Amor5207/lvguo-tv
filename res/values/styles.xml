@@ -10,10 +10,7 @@
     </style>
 
     <style name="StartupTheme" parent="@style/AppTheme">
-        <!-- 透明启动页：首页在下面先出画，启动页只负责在真正慢的时候渐入/渐出 -->
-        <item name="android:windowIsTranslucent">true</item>
-        <item name="android:windowBackground">@android:color/transparent</item>
-        <item name="android:backgroundDimEnabled">false</item>
+        <!-- 非透明启动页，确保冷启动从竖屏桌面直接进入横屏，避免透明 Window 继承桌面竖屏方向 -->
     </style>
 
     <style name="PlayerTheme" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">

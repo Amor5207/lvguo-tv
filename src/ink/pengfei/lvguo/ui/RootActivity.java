@@ -76,6 +76,7 @@ public class RootActivity extends ink.pengfei.lvguo.PlaybackHostActivity {
     private Runnable mRestoreOverlayPosition;
     private android.app.Dialog mExitDialog;
     private boolean startupFrameDrawn;
+    private boolean loginPromptChecked;
 
     // ------------------------------------------------------------ 生命周期
 
@@ -89,23 +90,19 @@ public class RootActivity extends ink.pengfei.lvguo.PlaybackHostActivity {
         getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Ui.BG));
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON | WindowManager.LayoutParams.FLAG_FULLSCREEN);
         applyImmersive();
-        // 必须登录才能看：未登录直接去登录页，不构建首页
-        if(toLoginIfNeeded())return;
         ink.pengfei.lvguo.net.Session.listen(sessionWatcher);
         if(ink.pengfei.lvguo.App.prefs().getBoolean("usage_consent",false))enterApplication();
         else ink.pengfei.lvguo.ui.widget.UsageConsent.show(this,this::enterApplication);
     }
 
-    // 会话变化（退出登录 / 续期失败）：回到登录页
-    private final Runnable sessionWatcher=()->runOnUiThread(this::toLoginIfNeeded);
-
-    /** 未登录则跳登录页并结束首页；返回是否已跳转。 */
-    private boolean toLoginIfNeeded(){
-        if(ink.pengfei.lvguo.net.Session.loggedIn()||isFinishing())return !ink.pengfei.lvguo.net.Session.loggedIn();
-        startActivity(new android.content.Intent(this,LoginActivity.class));
-        finish();
-        return true;
-    }
+    // 会话变化（退出登录 / 续期失败）：原地刷新当前页，不强制踢回登录页
+    private final Runnable sessionWatcher=()->runOnUiThread(()->{
+        if(isFinishing() || isDestroyed())return;
+        if(mCur>=0 && mCur<mPages.length && mPages[mCur]!=null)mPages[mCur].onShow();
+        if(!ink.pengfei.lvguo.net.Session.loggedIn() && ink.pengfei.lvguo.net.Session.wasExpired()){
+            toast("登录已过期，当前以游客模式继续观看");
+        }
+    });
 
     private void enterApplication(){
         if(isFinishing() || isDestroyed() || mRoot!=null)return;
@@ -118,11 +115,26 @@ public class RootActivity extends ink.pengfei.lvguo.PlaybackHostActivity {
         // 导航默认收起：启动后把焦点交给内容区（首页数据到达后会再落到第一张卡）。
         mPages[TAB_HOME].focusFirst();
         reportStartupDrawn();
+        maybeShowLoginPrompt();
         // 启动续播：上次没看完的剧（弹窗询问 / 直接续播 / 不提示，见设置 → 播放）
         // 强制休息结束回到首页时不续播（需求：休息结束不自动恢复之前的视频）
         if(!getIntent().getBooleanExtra(ink.pengfei.lvguo.care.RestActivity.EXTRA_AFTER_REST,false))
             mRoot.post(()->ink.pengfei.lvguo.ui.widget.ResumePrompt.afterHistoryReady(this,
                     ()->mResumed && mCur==TAB_HOME && !isOverlayOpen() && !ink.pengfei.lvguo.care.RestMode.isResting()));
+    }
+
+    private void maybeShowLoginPrompt(){
+        if(loginPromptChecked || mRoot==null || isFinishing() || isDestroyed())return;
+        if(ink.pengfei.lvguo.net.Session.loggedIn() || ink.pengfei.lvguo.care.RestMode.isResting())return;
+        if(!ink.pengfei.lvguo.App.prefs().getBoolean("usage_consent",false))return;
+        loginPromptChecked=true;
+        mRoot.post(()->{
+            if(mResumed && !isFinishing() && !ink.pengfei.lvguo.net.Session.loggedIn() && !ink.pengfei.lvguo.care.RestMode.isResting()){
+                ink.pengfei.lvguo.ui.widget.LoginPrompt.showIfFirstVisit(this,()->{
+                    if(mCur==TAB_HOME && mPages[TAB_HOME]!=null)mPages[TAB_HOME].focusFirst();
+                });
+            }
+        });
     }
 
     /** 首页首帧真正上屏时通知启动页；之前已出过画（进程还活着）时 onResume 直接放行。 */
@@ -154,11 +166,12 @@ public class RootActivity extends ink.pengfei.lvguo.PlaybackHostActivity {
 
     @Override protected void onResume(){
         super.onResume();
+        Ui.enforceLandscape(this);
         mResumed=true;
         if(ink.pengfei.lvguo.care.RestMode.enforce(this))return;
         if(startupFrameDrawn)StartupGate.drawn();
-        if(toLoginIfNeeded())return;
         restWatch.run();
+        maybeShowLoginPrompt();
         // 播放器会把全局调色板强制成深色；返回后恢复 App 选定的主题，后续新建的视图才一致。
         Ui.applyTheme(this);
         for (NavItem it : mNavItems) paintNav(it, it.index == navIndex(mCur));

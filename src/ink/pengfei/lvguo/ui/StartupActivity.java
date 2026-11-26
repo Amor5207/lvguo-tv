@@ -31,6 +31,7 @@ public final class StartupActivity extends Activity {
         super.onCreate(saved);
         if(ink.pengfei.lvguo.care.RestMode.enforce(this))return;
         ink.pengfei.lvguo.net.LibrarySync.preloadHistory();
+        Ui.adaptScreen(this);
         Ui.applyTheme(this);
 
         FrameLayout root=new FrameLayout(this);root.setBackgroundColor(Ui.BG);
@@ -68,7 +69,7 @@ public final class StartupActivity extends Activity {
         splash=root;this.page=page;
         root.setAlpha(0f);page.setScaleX(.96f);page.setScaleY(.96f);
 
-        Intent next=new Intent(this,ink.pengfei.lvguo.net.Session.loggedIn()?RootActivity.class:LoginActivity.class);
+        Intent next=new Intent(this,RootActivity.class);
         // 首次运行要弹使用须知，直接交给目标页处理，开屏盖在上面反而挡住弹窗。
         if(!App.prefs().getBoolean("usage_consent",false)){
             startActivity(next);overridePendingTransition(0,0);finish();return;

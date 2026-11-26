@@ -59,7 +59,8 @@ public class HomePage extends Page {
         intro.setLineSpacing(Ui.dp(ctx, 4), 1f);
         LinearLayout.LayoutParams il = Ui.lp(-1, -2); il.topMargin = Ui.dp(ctx, 10);
         info.addView(intro, il);
-        FrameLayout.LayoutParams infoLp = new FrameLayout.LayoutParams(Ui.dp(ctx, 560), Ui.dp(ctx, BILLBOARD_DP));   // 文字留在封面渐隐区内，不压到人脸
+        int infoW = Math.min(Ui.dp(ctx, 560), Math.max(Ui.dp(ctx, 220), ctx.getResources().getDisplayMetrics().widthPixels - Ui.dp(ctx, Ui.RAIL_W + 40)));
+        FrameLayout.LayoutParams infoLp = new FrameLayout.LayoutParams(infoW, Ui.dp(ctx, BILLBOARD_DP));   // 文字留在封面渐隐区内，不压到人脸
         root.addView(info, infoLp);
 
         // 右上角：搜索 / 手机遥控（图标 + 文字，含义一眼能看懂）；看板文字收窄到 560dp，不会被挡住

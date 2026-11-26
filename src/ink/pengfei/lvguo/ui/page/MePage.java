@@ -27,6 +27,7 @@ import ink.pengfei.lvguo.ui.widget.TvDialog;
 
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -118,7 +119,9 @@ public class MePage extends Page {
                 String cookie = Session.cookieHeader();
                 App.io().execute(() -> ink.pengfei.lvguo.net.Account.logoutRemote(cookie));
                 Session.logout();
+                clearReservations();
                 renderProfile();
+                renderReservationArea();
             });
         }, this::scrollPageToTop);
         actionTiles.addView(logout, Ui.lp(Ui.dp(ctx, 88), Ui.dp(ctx, 76)));
@@ -180,6 +183,7 @@ public class MePage extends Page {
         }
         col.addView(reserveSkeleton, rowLp());
         reserveRow.setVisibility(View.GONE);
+        reserveSkeleton.setVisibility(View.GONE);
         updateReserveTabs();
 
         return scroll;
@@ -259,6 +263,9 @@ public class MePage extends Page {
 
     @Override public void onShow() {
         root.setBackgroundColor(Ui.BG);   // 不透出首页的大封面背景
+        if (!Session.loggedIn()) {
+            clearReservations();
+        }
         renderProfile();
         renderLibrary();
         if (Session.loggedIn()) {
@@ -267,6 +274,8 @@ public class MePage extends Page {
             });
             ink.pengfei.lvguo.net.LibrarySync.pull();
             if (System.currentTimeMillis() - reservationsLoadedAt > 60_000) loadReservations();
+        } else {
+            renderReservationArea();
         }
     }
 
@@ -441,8 +450,30 @@ public class MePage extends Page {
         renderReservationArea();
     }
 
-    /** 按当前标签重画预约区：未加载=占位，失败 / 为空=一行说明，否则一行卡片。 */
+    private void clearReservations() {
+        onlineItems = Collections.emptyList();
+        offlineItems = Collections.emptyList();
+        onlineTotal = 0;
+        offlineTotal = 0;
+        reservationCount = -1;
+        reservationsReady = false;
+        reservationsFailed = false;
+        reservationsLoadedAt = 0;
+    }
+
+    /** 按当前标签重画预约区：未登录 / 为空=一行说明，加载中=占位，失败=一行说明，否则一行卡片。 */
     private void renderReservationArea() {
+        if (!Session.loggedIn()) {
+            reserveTabs[0].setText("已上线");
+            reserveTabs[1].setText("待上线");
+            updateReserveTabs();
+            reserveSkeleton.setVisibility(View.GONE);
+            reserveRow.clear();
+            reserveRow.setVisibility(View.GONE);
+            reserveEmpty.setText("暂无预约");
+            reserveEmpty.setVisibility(View.VISIBLE);
+            return;
+        }
         reserveTabs[0].setText(reservationsReady ? "已上线 " + onlineTotal : "已上线");
         reserveTabs[1].setText(reservationsReady ? "待上线 " + offlineTotal : "待上线");
         updateReserveTabs();

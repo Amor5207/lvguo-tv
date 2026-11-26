@@ -594,7 +594,7 @@ public class DetailPage extends Page {
     }
     private void toggleReserve() {
         if (mSeriesId == null || mReserveBusy) return;
-        if (!ink.pengfei.lvguo.net.Session.loggedIn()) { host.toast("登录后可预约上线提醒"); return; }
+        if (!ink.pengfei.lvguo.net.Session.loggedIn()) { ink.pengfei.lvguo.ui.widget.LoginPrompt.showForFeature(host, "登录后可预约上线提醒，开播第一时间在「我的」查看。"); return; }
         if (mReserved) {   // 取消预约必须二次确认，防误触
             ink.pengfei.lvguo.ui.widget.TvDialog.confirm(host, "取消预约？", "《" + displayTitle() + "》上线后将不再提醒。", "取消预约", () -> applyReserve(false));
             return;

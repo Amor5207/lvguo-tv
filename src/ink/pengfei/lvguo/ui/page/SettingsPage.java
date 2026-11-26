@@ -258,8 +258,8 @@ public class SettingsPage extends Page {
                             String cookie = Session.cookieHeader();
             App.io().execute(() -> ink.pengfei.lvguo.net.Account.logoutRemote(cookie));
                             Session.logout();
-                            host.startActivity(new android.content.Intent(host, ink.pengfei.lvguo.ui.LoginActivity.class));
-                            host.finish();
+                            host.toast("已退出登录");
+                            refreshRows();
                         })), row);
         }));
         // 账号不放在设置里：退出在「我的」页右上角

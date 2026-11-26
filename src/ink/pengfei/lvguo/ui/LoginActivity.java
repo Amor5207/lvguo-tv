@@ -38,10 +38,11 @@ public class LoginActivity extends Activity {
     private android.widget.EditText phoneInput, codeInput;
     private View leftColumn, loginDesc, qrCard;
     private LinearLayout loginRow;
-    private TextView sendBtn, phoneStatus, tabQr, tabPhone, loginTitle;
+    private TextView sendBtn, phoneStatus, tabQr, tabPhone, loginTitle, skipBtn, loginBtn;
     private boolean loginExpired;
     private boolean phoneMode;
     private boolean startupFrameDrawn;
+    private boolean compactLayout, narrowLayout;
     private long codeSentAt;
     private final ink.pengfei.lvguo.net.lvguosign.LvguoAccount account = new ink.pengfei.lvguo.net.lvguosign.LvguoAccount();
 
@@ -50,11 +51,29 @@ public class LoginActivity extends Activity {
         if (ink.pengfei.lvguo.care.RestMode.enforce(this)){ink.pengfei.lvguo.ui.StartupGate.drawn();return;}   // 强制休息时段内：直接进休息页
         // 已登录直接进主界面，不先建一遍登录页（启动 Activity 每次冷启动都会经过这里）
         if (Session.loggedIn()) { finishToApp(); return; }
+        Ui.adaptScreen(this);
         Ui.applyTheme(this);
         getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Ui.BG));
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(buildUi());
         reportStartupDrawn();
+    }
+
+    @Override public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        String pText = phoneInput != null ? phoneInput.getText().toString() : "";
+        String cText = codeInput != null ? codeInput.getText().toString() : "";
+        boolean wasPhone = phoneMode;
+        Ui.adaptScreen(this);
+        setContentView(buildUi());
+        if (phoneInput != null && !pText.isEmpty()) phoneInput.setText(pText);
+        if (codeInput != null && !cText.isEmpty()) codeInput.setText(cText);
+        switchMode(wasPhone, false);
+        if (!wasPhone && login != null && login.image != null && qrImage != null) {
+            Bitmap bmp = BitmapFactory.decodeByteArray(login.image, 0, login.image.length);
+            if (bmp != null) { qrImage.setImageBitmap(bmp); qrImage.setAlpha(1f); }
+            tick();
+        }
     }
 
     private void reportStartupDrawn(){
@@ -77,98 +96,122 @@ public class LoginActivity extends Activity {
     private final Runnable ticker = new Runnable() { @Override public void run() { tick(); } };
 
     private View buildUi() {
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        float widthDp = dm.widthPixels / dm.density;
+        float heightDp = dm.heightPixels / dm.density;
+        final boolean compact = widthDp < 820f || heightDp < 480f;
+        final boolean narrow = widthDp < 560f || heightDp < 400f;
+        compactLayout = compact;
+        narrowLayout = narrow;
+
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Ui.BG);
 
-        // 顶部品牌条：logo + 名称 + 版本
+        // 顶部品牌条：logo + 名称 + 版本 + 右上角「暂不登录」
         LinearLayout brand = Ui.row(this);
         brand.setGravity(Gravity.CENTER_VERTICAL);
         ImageView logo = new ImageView(this);
         logo.setImageResource(ink.pengfei.lvguo.R.drawable.logo_mark);
-        brand.addView(logo, Ui.lp(Ui.dp(this, 36), Ui.dp(this, 36)));
-        TextView appName = Ui.text(this, "绿果TV", 20, Ui.TEXT, true);
-        LinearLayout.LayoutParams an = Ui.lp(-2, -2); an.leftMargin = Ui.dp(this, 12);
+        int logoSize = Ui.dp(this, narrow ? 28 : 36);
+        brand.addView(logo, Ui.lp(logoSize, logoSize));
+        TextView appName = Ui.text(this, "绿果TV", narrow ? 17 : 20, Ui.TEXT, true);
+        LinearLayout.LayoutParams an = Ui.lp(-2, -2); an.leftMargin = Ui.dp(this, narrow ? 8 : 12);
         brand.addView(appName, an);
-        TextView ver = Ui.text(this, "v" + version(), 13, Ui.TEXT_3, false);
-        LinearLayout.LayoutParams vl = Ui.lp(-2, -2); vl.leftMargin = Ui.dp(this, 10);
+        TextView ver = Ui.text(this, "v" + version(), narrow ? 12 : 13, Ui.TEXT_3, false);
+        LinearLayout.LayoutParams vl = Ui.lp(-2, -2); vl.leftMargin = Ui.dp(this, 8);
         brand.addView(ver, vl);
+        int sidePad = narrow ? 18 : compact ? 28 : 56;
+        int topPad = narrow ? 12 : compact ? 18 : 32;
         FrameLayout.LayoutParams bl = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
-        bl.setMargins(Ui.dp(this, 56), Ui.dp(this, 32), 0, 0);
+        bl.setMargins(Ui.dp(this, sidePad), Ui.dp(this, topPad), 0, 0);
         root.addView(brand, bl);
 
-        LinearLayout row = Ui.row(this);
-        loginRow = row;
-        row.setGravity(Gravity.CENTER_VERTICAL);
+        skipBtn = Ui.action(this, "暂不登录", -1, false);
+        skipBtn.setTextSize(narrow ? 12.5f : 14);
+        skipBtn.setMinHeight(Ui.dp(this, narrow ? 34 : 42));
+        Ui.padding(skipBtn, narrow ? 12 : 18, 0, narrow ? 12 : 18, 0);
+        skipBtn.setOnClickListener(v -> dismissLogin());
+        FrameLayout.LayoutParams slp = new FrameLayout.LayoutParams(-2, Ui.dp(this, narrow ? 34 : 42), Gravity.TOP | Gravity.END);
+        slp.setMargins(0, Ui.dp(this, Math.max(8, topPad - 4)), Ui.dp(this, sidePad), 0);
+        root.addView(skipBtn, slp);
 
-        // 左侧：标题 + 三步说明 + 安全承诺
+        final boolean portrait = false;
+        LinearLayout row = Ui.row(this);
+        row.setOrientation(portrait ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        loginRow = row;
+        row.setGravity(portrait ? Gravity.CENTER_HORIZONTAL : Gravity.CENTER_VERTICAL);
+
+        // 左侧：标题 + 模式切换 + 三步说明
         LinearLayout left = Ui.column(this);
         boolean expired = ink.pengfei.lvguo.net.Session.wasExpired();
         loginExpired = expired;
-        TextView title = Ui.text(this, expired ? "请重新扫码登录" : "用红果 App 扫码登录", 28, Ui.TEXT, true);
+        TextView title = Ui.text(this, expired ? "请重新扫码登录" : "用红果 App 扫码登录",
+                narrow ? 19 : compact ? 23 : 28, Ui.TEXT, true);
         loginTitle = title;
         if (expired) {
             // 登录过期回来的：标题后面同一行一个「登录已过期」标签，说清楚发生了什么
             LinearLayout titleRow = Ui.row(this);
             titleRow.addView(title);
-            TextView notice = Ui.text(this, "登录已过期", 14, 0xFFFF9F0A, true);
-            Ui.padding(notice, 12, 4, 12, 4);
+            TextView notice = Ui.text(this, "登录已过期", narrow ? 12 : 14, 0xFFFF9F0A, true);
+            Ui.padding(notice, 10, 4, 10, 4);
             notice.setBackground(Ui.round(this, 0x26FF9F0A, 14));
-            LinearLayout.LayoutParams nl = Ui.lp(-2, -2); nl.leftMargin = Ui.dp(this, 14);
+            LinearLayout.LayoutParams nl = Ui.lp(-2, -2); nl.leftMargin = Ui.dp(this, 10);
             titleRow.addView(notice, nl);
             left.addView(titleRow);
         } else left.addView(title);
         TextView desc = Ui.text(this, expired ? "登录已失效，请重新登录。"
-                : "", 15, Ui.TEXT_2, false);
+                : "", narrow ? 12.5f : compact ? 14 : 15, Ui.TEXT_2, false);
         desc.setLineSpacing(Ui.dp(this, 4), 1);
         loginDesc = desc;
         if (!expired) desc.setVisibility(View.GONE);
-        LinearLayout.LayoutParams dl = Ui.lp(-1, -2); dl.topMargin = Ui.dp(this, 8);
+        LinearLayout.LayoutParams dl = Ui.lp(-1, -2); dl.topMargin = Ui.dp(this, 6);
         left.addView(desc, dl);
 
         // 顶部切换：扫码登录 / 手机号登录
-        LinearLayout.LayoutParams tabsLp = Ui.lp(-2, -2); tabsLp.topMargin = Ui.dp(this, 20);
+        LinearLayout.LayoutParams tabsLp = Ui.lp(-2, -2); tabsLp.topMargin = Ui.dp(this, narrow ? 10 : compact ? 14 : 20);
         left.addView(buildTabs(), tabsLp);
 
         stepsBox = Ui.column(this);
         fillSteps(QR_STEPS);
         left.addView(stepsBox, Ui.lp(-1, -2));
 
-
-
         // 右侧：二维码卡（白底，深浅主题下都能扫）+ 有效期倒计时
+        int qrCardDp = narrow ? Math.max(132, Math.min(176, (int) (heightDp * 0.48f)))
+                : compact ? Math.max(176, Math.min(220, (int) (heightDp * 0.48f))) : 264;
+        int qrImgDp = qrCardDp - (narrow ? 20 : 32);
         LinearLayout right = Ui.column(this);
         right.setGravity(Gravity.CENTER_HORIZONTAL);
-        RoundFrame card = new RoundFrame(this, 22);
-        card.setBackground(Ui.round(this, 0xFFFFFFFF, 22));
+        RoundFrame card = new RoundFrame(this, narrow ? 14 : 22);
+        card.setBackground(Ui.round(this, 0xFFFFFFFF, narrow ? 14 : 22));
         qrImage = new ImageView(this);
         qrImage.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        card.addView(qrImage, new FrameLayout.LayoutParams(Ui.dp(this, 228), Ui.dp(this, 228), Gravity.CENTER));
+        card.addView(qrImage, new FrameLayout.LayoutParams(Ui.dp(this, qrImgDp), Ui.dp(this, qrImgDp), Gravity.CENTER));
         // 已扫码遮罩：盖在二维码上，告诉用户去手机上确认
         LinearLayout mask = Ui.column(this);
         mask.setGravity(Gravity.CENTER);
         mask.setBackgroundColor(0xF2FFFFFF);
         FrameLayout okCircle = new FrameLayout(this);
-        okCircle.setBackground(Ui.round(this, Ui.PRIMARY, 28));
-        IconView ok = new IconView(this, IconView.CHECK, 28);
+        okCircle.setBackground(Ui.round(this, Ui.PRIMARY, narrow ? 20 : 28));
+        IconView ok = new IconView(this, IconView.CHECK, narrow ? 20 : 28);
         ok.setColor(Ui.ON_ACCENT);
-        okCircle.addView(ok, new FrameLayout.LayoutParams(Ui.dp(this, 28), Ui.dp(this, 28), Gravity.CENTER));
-        mask.addView(okCircle, Ui.lp(Ui.dp(this, 56), Ui.dp(this, 56)));
-        TextView m1 = Ui.text(this, "扫码成功", 20, 0xFF1C1C1E, true);
-        LinearLayout.LayoutParams m1l = Ui.lp(-2, -2); m1l.topMargin = Ui.dp(this, 14);
+        okCircle.addView(ok, new FrameLayout.LayoutParams(Ui.dp(this, narrow ? 20 : 28), Ui.dp(this, narrow ? 20 : 28), Gravity.CENTER));
+        mask.addView(okCircle, Ui.lp(Ui.dp(this, narrow ? 40 : 56), Ui.dp(this, narrow ? 40 : 56)));
+        TextView m1 = Ui.text(this, "扫码成功", narrow ? 16 : 20, 0xFF1C1C1E, true);
+        LinearLayout.LayoutParams m1l = Ui.lp(-2, -2); m1l.topMargin = Ui.dp(this, narrow ? 8 : 14);
         mask.addView(m1, m1l);
-        TextView m2 = Ui.text(this, "请在手机上点「确认登录」", 14, 0xFF6E6E73, false);
-        LinearLayout.LayoutParams m2l = Ui.lp(-2, -2); m2l.topMargin = Ui.dp(this, 6);
+        TextView m2 = Ui.text(this, "请在手机上点「确认登录」", narrow ? 12 : 14, 0xFF6E6E73, false);
+        LinearLayout.LayoutParams m2l = Ui.lp(-2, -2); m2l.topMargin = Ui.dp(this, 4);
         mask.addView(m2, m2l);
         mask.setVisibility(View.GONE);
         scannedMask = mask;
         card.addView(mask, new FrameLayout.LayoutParams(-1, -1));
-        right.addView(card, Ui.lp(Ui.dp(this, 264), Ui.dp(this, 264)));
+        right.addView(card, Ui.lp(Ui.dp(this, qrCardDp), Ui.dp(this, qrCardDp)));
         qrCard = card;
 
         // 二维码下方只留一行「xx 秒后刷新」（状态提示也写在这一行），不再放说明文字和进度条
-        countdown = Ui.text(this, "正在获取二维码…", 14, Ui.TEXT_3, false);
+        countdown = Ui.text(this, "正在获取二维码…", narrow ? 12.5f : 14, Ui.TEXT_3, false);
         countdown.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams cl = Ui.lp(Ui.dp(this, 264), -2); cl.topMargin = Ui.dp(this, 14);
+        LinearLayout.LayoutParams cl = Ui.lp(-1, -2); cl.topMargin = Ui.dp(this, narrow ? 8 : 14);
         right.addView(countdown, cl);
         hint = countdown;
         countdownTrack = new View(this); countdownBar = new View(this);
@@ -176,29 +219,40 @@ public class LoginActivity extends Activity {
         refreshButton = Ui.action(this, "重新获取二维码", IconView.REFRESH, false);
         refreshButton.setOnClickListener(v -> { autoRefreshes = 0; newCode(); });
         refreshButton.setVisibility(View.GONE);
-        LinearLayout.LayoutParams rl = Ui.lp(-2, Ui.dp(this, 46)); rl.topMargin = Ui.dp(this, 14);
+        LinearLayout.LayoutParams rl = Ui.lp(-2, Ui.dp(this, narrow ? 38 : 46)); rl.topMargin = Ui.dp(this, narrow ? 8 : 14);
         right.addView(refreshButton, rl);
 
-        // 左侧垂直居中，右侧始终按自身内容垂直居中；固定左右列宽与间距，切换模式或弹出短信验证时左侧不位移
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams leftLp = Ui.lp(Ui.dp(this, 430), -2);
-        leftLp.rightMargin = Ui.dp(this, 72);
-        leftLp.gravity = Gravity.CENTER_VERTICAL;
+        // 按可用宽度等比分配左右两列（竖屏自动上下堆叠），保证小屏完整展示不裁切
+        row.setGravity(portrait ? Gravity.CENTER_HORIZONTAL : Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams leftLp = portrait ? Ui.lp(-1, -2) : Ui.lp(0, -2, narrow ? 0.92f : 1.05f);
+        if (portrait) leftLp.bottomMargin = Ui.dp(this, 24);
+        else { leftLp.rightMargin = Ui.dp(this, narrow ? 16 : compact ? 28 : 64); leftLp.gravity = Gravity.CENTER_VERTICAL; }
         row.addView(left, leftLp);
         leftColumn = left;
         FrameLayout rightSlot = new FrameLayout(this);
         qrSide = right;
-        rightSlot.addView(right, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+        rightSlot.addView(right, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
         phoneForm = buildPhoneForm();
         phoneForm.setVisibility(View.GONE);
         rightSlot.addView(phoneForm, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
-        LinearLayout.LayoutParams rightLp = Ui.lp(Ui.dp(this, 380), -2);
-        rightLp.gravity = Gravity.CENTER_VERTICAL;
+        LinearLayout.LayoutParams rightLp = portrait ? Ui.lp(-1, -2) : Ui.lp(0, -2, narrow ? 1.08f : 0.95f);
+        if (!portrait) rightLp.gravity = Gravity.CENTER_VERTICAL;
         row.addView(rightSlot, rightLp);
-        FrameLayout.LayoutParams rowLp = new FrameLayout.LayoutParams(-2, -1, Gravity.CENTER);
-        rowLp.topMargin = Ui.dp(this, 36);   // 给顶部品牌条让位，避免和标题挤在一起
-        root.addView(row, rowLp);
 
+        int maxRowPx = Math.min(dm.widthPixels - Ui.dp(this, narrow ? 28 : compact ? 48 : 96), Ui.dp(this, 880));
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        scroll.setFillViewport(true);
+        FrameLayout scrollWrap = new FrameLayout(this);
+        scrollWrap.addView(row, new FrameLayout.LayoutParams(maxRowPx, -2, Gravity.CENTER));
+        scroll.addView(scrollWrap, new FrameLayout.LayoutParams(-1, -2));
+        FrameLayout.LayoutParams scrollLp = new FrameLayout.LayoutParams(-1, -1);
+        scrollLp.topMargin = Ui.dp(this, narrow ? 48 : compact ? 64 : 84);
+        root.addView(scroll, scrollLp);
+
+        wireFocusGraph();
+        if (tabQr != null && !phoneMode) tabQr.post(() -> { if (tabQr != null && !phoneMode) tabQr.requestFocus(); });
         return root;
     }
 
@@ -206,20 +260,22 @@ public class LoginActivity extends Activity {
         LinearLayout box = Ui.row(this);
         box.setBackground(Ui.round(this, Ui.FILL, 20));
         Ui.padding(box, 4, 4, 4, 4);
-        tabQr = tab("扫码登录", true, v -> switchMode(false));
-        tabPhone = tab("手机号登录", false, v -> switchMode(true));
-        box.addView(tabQr, Ui.lp(Ui.dp(this, 112), Ui.dp(this, 38)));
-        box.addView(tabPhone, Ui.lp(Ui.dp(this, 112), Ui.dp(this, 38)));
+        int tabW = Ui.dp(this, narrowLayout ? 84 : compactLayout ? 98 : 112);
+        int tabH = Ui.dp(this, narrowLayout ? 32 : 38);
+        tabQr = tab("扫码登录", false, true);
+        tabPhone = tab("手机号登录", true, false);
+        box.addView(tabQr, Ui.lp(tabW, tabH));
+        box.addView(tabPhone, Ui.lp(tabW, tabH));
         return box;
     }
-    private TextView tab(String label, boolean active, View.OnClickListener click) {
-        TextView t = Ui.text(this, label, 15, active ? Ui.ON_ACCENT : Ui.TEXT_2, true);
+    private TextView tab(String label, final boolean phoneTab, boolean active) {
+        TextView t = Ui.text(this, label, narrowLayout ? 13 : 15, active ? Ui.ON_ACCENT : Ui.TEXT_2, true);
         t.setGravity(Gravity.CENTER);
         t.setBackground(active ? Ui.round(this, Ui.PRIMARY, 16) : null);
         t.setFocusable(true);
         if (android.os.Build.VERSION.SDK_INT >= 26) t.setDefaultFocusHighlightEnabled(false);
-        t.setOnClickListener(click);
-        t.setOnFocusChangeListener((v, f) -> { if (f) click.onClick(v); paintTabs(); });
+        t.setOnClickListener(v -> switchMode(phoneTab, true));
+        t.setOnFocusChangeListener((v, f) -> { if (f) switchMode(phoneTab, false); paintTabs(); });
         return t;
     }
     private void paintTabs() {
@@ -234,14 +290,16 @@ public class LoginActivity extends Activity {
     }
 
     private View buildPhoneForm() {
+        int fieldH = Ui.dp(this, narrowLayout ? 42 : compactLayout ? 48 : 56);
+        int sendW = Ui.dp(this, narrowLayout ? 88 : compactLayout ? 104 : 124);
         LinearLayout box = Ui.column(this);
         phoneInput = input("请输入手机号", 11, android.text.InputType.TYPE_CLASS_PHONE);
         box.addView(field(phoneInput, "+86"), inputLp(0));
         LinearLayout codeRow = Ui.row(this);
         codeRow.setGravity(Gravity.CENTER_VERTICAL);
         codeInput = input("请输入验证码", 8, android.text.InputType.TYPE_CLASS_NUMBER);
-        codeRow.addView(field(codeInput, null), Ui.lp(0, Ui.dp(this, 56), 1));
-        sendBtn = Ui.text(this, "发送验证码", 15, Ui.PRIMARY, true);
+        codeRow.addView(field(codeInput, null), Ui.lp(0, fieldH, 1));
+        sendBtn = Ui.text(this, "发送验证码", narrowLayout ? 12.5f : compactLayout ? 13.5f : 15, Ui.PRIMARY, true);
         sendBtn.setGravity(Gravity.CENTER);
         sendBtn.setFocusable(true);
         paintSend(false);
@@ -252,11 +310,11 @@ public class LoginActivity extends Activity {
         phoneInput.setOnEditorActionListener((v, a, ev) -> { codeInput.requestFocus(); return true; });
         codeInput.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
         codeInput.setOnEditorActionListener((v, a, ev) -> { hideIme(codeInput); doLogin(); return true; });
-        LinearLayout.LayoutParams sbl = Ui.lp(Ui.dp(this, 124), Ui.dp(this, 56)); sbl.leftMargin = Ui.dp(this, 10);
+        LinearLayout.LayoutParams sbl = Ui.lp(sendW, fieldH); sbl.leftMargin = Ui.dp(this, narrowLayout ? 8 : 10);
         codeRow.addView(sendBtn, sbl);
         box.addView(codeRow, inputLp(12));
         // 与输入框同高同圆角；未聚焦为主色淡底，聚焦时整块填充主色（与「发送验证码」一致）
-        TextView loginBtn = Ui.text(this, "登录", 18, Ui.PRIMARY, true);
+        loginBtn = Ui.text(this, "登录", narrowLayout ? 15 : compactLayout ? 16.5f : 18, Ui.PRIMARY, true);
         loginBtn.setGravity(Gravity.CENTER);
         loginBtn.setFocusable(true);
         loginBtn.setBackground(Ui.round(this, Ui.TINT_PRIMARY, 14));
@@ -418,18 +476,42 @@ public class LoginActivity extends Activity {
     }
     private android.widget.EditText input(String hint, int maxLen, int type) {
         android.widget.EditText e = new android.widget.EditText(this);
-        e.setHint(hint); e.setTextSize(18); e.setTextColor(Ui.TEXT); e.setHintTextColor(Ui.TEXT_4);
+        e.setHint(hint); e.setTextSize(narrowLayout ? 14 : compactLayout ? 16 : 18); e.setTextColor(Ui.TEXT); e.setHintTextColor(Ui.TEXT_4);
         e.setInputType(type); e.setSingleLine(true);
         e.setBackground(null);
         e.setPadding(0, 0, 0, 0);
         e.setGravity(Gravity.CENTER_VERTICAL);
         e.setFocusable(true); e.setFocusableInTouchMode(true);
         e.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(maxLen)});
-        // 电视上方向键移到输入框不会自动弹键盘：按确定 / 点击时主动弹出
+        // 电视上方向键移到输入框不会自动弹键盘：按确定 / 点击时主动弹出；并支持上下左右方向键顺畅移出输入框
         e.setOnKeyListener((v, code, ev) -> {
             if (code == android.view.KeyEvent.KEYCODE_DPAD_CENTER || code == android.view.KeyEvent.KEYCODE_ENTER || code == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER) {
                 if (ev.getAction() == android.view.KeyEvent.ACTION_UP) showIme(e);
                 return true;
+            }
+            if (ev.getAction() == android.view.KeyEvent.ACTION_DOWN) {
+                if (code == android.view.KeyEvent.KEYCODE_DPAD_UP) {
+                    hideIme(e);
+                    if (e == codeInput && phoneInput != null) phoneInput.requestFocus();
+                    else if (skipBtn != null) skipBtn.requestFocus();
+                    return true;
+                }
+                if (code == android.view.KeyEvent.KEYCODE_DPAD_DOWN) {
+                    hideIme(e);
+                    if (e == phoneInput && codeInput != null) codeInput.requestFocus();
+                    else if (loginBtn != null) loginBtn.requestFocus();
+                    return true;
+                }
+                if (code == android.view.KeyEvent.KEYCODE_DPAD_LEFT && e.getSelectionStart() <= 0) {
+                    hideIme(e);
+                    if (tabPhone != null) tabPhone.requestFocus();
+                    return true;
+                }
+                if (code == android.view.KeyEvent.KEYCODE_DPAD_RIGHT && e == codeInput && e.getSelectionEnd() >= e.length()) {
+                    hideIme(e);
+                    if (sendBtn != null) sendBtn.requestFocus();
+                    return true;
+                }
             }
             return false;
         });
@@ -440,13 +522,15 @@ public class LoginActivity extends Activity {
     private View field(android.widget.EditText e, String prefix) {
         LinearLayout row = Ui.row(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        Ui.padding(row, 18, 0, 18, 0);
+        int hPad = narrowLayout ? 12 : 18;
+        Ui.padding(row, hPad, 0, hPad, 0);
         if (prefix != null) {
-            TextView p = Ui.text(this, prefix, 18, Ui.TEXT_2, true);
+            TextView p = Ui.text(this, prefix, narrowLayout ? 14 : compactLayout ? 16 : 18, Ui.TEXT_2, true);
             row.addView(p);
             View bar = new View(this);
             bar.setBackgroundColor(Ui.FILL);
-            LinearLayout.LayoutParams bl = Ui.lp(Ui.dp(this, 1), Ui.dp(this, 22)); bl.leftMargin = Ui.dp(this, 14); bl.rightMargin = Ui.dp(this, 14);
+            int divM = Ui.dp(this, narrowLayout ? 8 : 14);
+            LinearLayout.LayoutParams bl = Ui.lp(Ui.dp(this, 1), Ui.dp(this, narrowLayout ? 18 : 22)); bl.leftMargin = divM; bl.rightMargin = divM;
             row.addView(bar, bl);
         }
         row.addView(e, Ui.lp(0, -1, 1));
@@ -471,7 +555,9 @@ public class LoginActivity extends Activity {
         if (imm != null) imm.hideSoftInputFromWindow(e.getWindowToken(), 0);
     }
     private LinearLayout.LayoutParams inputLp(int topDp) {
-        LinearLayout.LayoutParams p = Ui.lp(-1, Ui.dp(this, 56)); p.topMargin = Ui.dp(this, topDp); return p;
+        int h = Ui.dp(this, narrowLayout ? 42 : compactLayout ? 48 : 56);
+        int top = Ui.dp(this, narrowLayout ? Math.min(topDp, 10) : topDp);
+        LinearLayout.LayoutParams p = Ui.lp(-1, h); p.topMargin = top; return p;
     }
 
     private static final String[] QR_STEPS = {"打开手机上的「红果免费短剧」App", "进入「我的」，点右上角扫一扫", "扫描右侧二维码，在手机上确认登录"};
@@ -486,23 +572,69 @@ public class LoginActivity extends Activity {
     private void fillSteps(String[] steps) {
         LinearLayout box = (LinearLayout) stepsBox;
         box.removeAllViews();
+        int badgeDp = narrowLayout ? 22 : 28;
+        float stepSp = narrowLayout ? 12 : compactLayout ? 13.5f : 15;
         for (int i = 0; i < steps.length; i++) {
             LinearLayout st = Ui.row(this);
             st.setGravity(Gravity.CENTER_VERTICAL);
-            TextView num = Ui.text(this, String.valueOf(i + 1), 14, Ui.PRIMARY, true);
+            TextView num = Ui.text(this, String.valueOf(i + 1), narrowLayout ? 12 : 14, Ui.PRIMARY, true);
             num.setGravity(Gravity.CENTER);
-            num.setBackground(Ui.round(this, Ui.TINT_PRIMARY, 14));
-            st.addView(num, Ui.lp(Ui.dp(this, 28), Ui.dp(this, 28)));
-            TextView t = Ui.text(this, steps[i], 15, Ui.TEXT, false);
-            LinearLayout.LayoutParams tl = Ui.lp(-2, -2); tl.leftMargin = Ui.dp(this, 14);
+            num.setBackground(Ui.round(this, Ui.TINT_PRIMARY, badgeDp / 2f));
+            st.addView(num, Ui.lp(Ui.dp(this, badgeDp), Ui.dp(this, badgeDp)));
+            TextView t = Ui.text(this, steps[i], stepSp, Ui.TEXT, false);
+            t.setLineSpacing(Ui.dp(this, 2), 1f);
+            LinearLayout.LayoutParams tl = Ui.lp(0, -2, 1f); tl.leftMargin = Ui.dp(this, narrowLayout ? 10 : 14);
             st.addView(t, tl);
-            LinearLayout.LayoutParams sl = Ui.lp(-1, -2); sl.topMargin = Ui.dp(this, i == 0 ? 22 : 12);
+            LinearLayout.LayoutParams sl = Ui.lp(-1, -2);
+            sl.topMargin = Ui.dp(this, i == 0 ? (narrowLayout ? 12 : 22) : (narrowLayout ? 8 : 12));
             box.addView(st, sl);
         }
     }
 
-    private void switchMode(boolean phone) {
-        if (phoneMode == phone && qrSide != null) { paintTabs(); return; }
+    private void wireFocusGraph() {
+        if (skipBtn == null || tabQr == null || tabPhone == null || phoneInput == null || codeInput == null || sendBtn == null || loginBtn == null) return;
+        skipBtn.setId(View.generateViewId());
+        tabQr.setId(View.generateViewId());
+        tabPhone.setId(View.generateViewId());
+        phoneInput.setId(View.generateViewId());
+        codeInput.setId(View.generateViewId());
+        sendBtn.setId(View.generateViewId());
+        loginBtn.setId(View.generateViewId());
+        if (refreshButton != null) refreshButton.setId(View.generateViewId());
+
+        tabQr.setNextFocusRightId(tabPhone.getId());
+        tabQr.setNextFocusUpId(skipBtn.getId());
+        tabPhone.setNextFocusLeftId(tabQr.getId());
+        tabPhone.setNextFocusRightId(phoneInput.getId());
+        tabPhone.setNextFocusDownId(phoneInput.getId());
+        tabPhone.setNextFocusUpId(skipBtn.getId());
+
+        skipBtn.setNextFocusDownId(tabQr.getId());
+        skipBtn.setNextFocusLeftId(tabPhone.getId());
+
+        phoneInput.setNextFocusUpId(skipBtn.getId());
+        phoneInput.setNextFocusDownId(codeInput.getId());
+        phoneInput.setNextFocusLeftId(tabPhone.getId());
+
+        codeInput.setNextFocusUpId(phoneInput.getId());
+        codeInput.setNextFocusDownId(loginBtn.getId());
+        codeInput.setNextFocusRightId(sendBtn.getId());
+        codeInput.setNextFocusLeftId(tabPhone.getId());
+
+        sendBtn.setNextFocusUpId(phoneInput.getId());
+        sendBtn.setNextFocusDownId(loginBtn.getId());
+        sendBtn.setNextFocusLeftId(codeInput.getId());
+
+        loginBtn.setNextFocusUpId(codeInput.getId());
+        loginBtn.setNextFocusLeftId(tabPhone.getId());
+    }
+
+    private void switchMode(boolean phone, boolean moveFocus) {
+        if (phoneMode == phone && qrSide != null) {
+            paintTabs();
+            if (phone && moveFocus && phoneInput != null) phoneInput.requestFocus();
+            return;
+        }
         phoneMode = phone;
         paintTabs();
         if (loginTitle != null) loginTitle.setText(phone ? "手机号登录" : (loginExpired ? "请重新扫码登录" : "用红果 App 扫码登录"));
@@ -512,7 +644,7 @@ public class LoginActivity extends Activity {
         if (phone) {
             generation++; pollingGen = -1; ui.removeCallbacks(ticker);
             App.pool().execute(account::warmDevice);
-            if (phoneInput != null) phoneInput.requestFocus();
+            if (moveFocus && phoneInput != null) phoneInput.requestFocus();
         } else {
             if (login == null || codeExpiresAt == 0 || codeExpiresAt <= System.currentTimeMillis()) newCode();
             else { tick(); poll(generation); }
@@ -606,6 +738,7 @@ public class LoginActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        Ui.enforceLandscape(this);
         if (ink.pengfei.lvguo.care.RestMode.enforce(this)) return;
         if(startupFrameDrawn)ink.pengfei.lvguo.ui.StartupGate.drawn();
         active = true;
@@ -685,8 +818,21 @@ public class LoginActivity extends Activity {
         });
     }
 
+    private void dismissLogin() {
+        if (RootActivity.current() == null || RootActivity.current().isFinishing()) {
+            startActivity(new android.content.Intent(this, RootActivity.class));
+        }
+        finish();
+    }
+
+    @Override public void onBackPressed() {
+        dismissLogin();
+    }
+
     private void finishToApp() {
-        startActivity(new android.content.Intent(this, RootActivity.class));
+        if (RootActivity.current() == null || RootActivity.current().isFinishing()) {
+            startActivity(new android.content.Intent(this, RootActivity.class));
+        }
         finish();
     }
 }

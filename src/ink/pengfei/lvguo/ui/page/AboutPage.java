@@ -79,7 +79,8 @@ public class AboutPage extends Page {
         gh.addView(ghText, gtl);
         LinearLayout.LayoutParams ghl = Ui.lp(-2, -2); ghl.topMargin = Ui.dp(ctx, 26);
         left.addView(gh, ghl);
-        panes.addView(left, Ui.lp(Ui.dp(ctx, 340), -2));
+        int leftW = Math.min(Ui.dp(ctx, 340), (int) (ctx.getResources().getDisplayMetrics().widthPixels * 0.36f));
+        panes.addView(left, Ui.lp(leftW, -2));
 
         // 右：免责声明（纯文本，一屏放下）
         LinearLayout right = Ui.column(ctx);

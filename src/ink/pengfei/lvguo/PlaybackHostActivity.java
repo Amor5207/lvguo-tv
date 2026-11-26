@@ -126,9 +126,15 @@ public class PlaybackHostActivity extends Activity implements SurfaceHolder.Call
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        Ui.adaptScreen(this);
         if (isEmbeddedPlaybackHost()) return;
         if(ink.pengfei.lvguo.care.RestMode.enforce(this))return;
         initializePlayback(getIntent(),false);
+    }
+
+    @Override public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        Ui.adaptScreen(this);
     }
     protected boolean isEmbeddedPlaybackHost(){return false;}
     private android.content.Intent embeddedIntent;

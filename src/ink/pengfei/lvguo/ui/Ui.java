@@ -234,6 +234,55 @@ public final class Ui {
         return dp(v.getContext(), val);
     }
 
+    private static float sSysDensity = -1f, sSysScaledDensity = -1f;
+    private static int sSysDensityDpi = -1;
+
+    /** 强制保持横屏（含反向横屏），防止手机等竖屏设备启动或返回时落入竖屏状态。 */
+    public static void enforceLandscape(android.app.Activity activity) {
+        if (activity == null) return;
+        try {
+            if (activity.getRequestedOrientation() != android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE) {
+                activity.setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /** 按 960×540dp 最小视口基准自适应缩放，避免 960×720 等小屏/高分屏下页面拥挤与裁切。 */
+    public static void adaptScreen(android.app.Activity activity) {
+        if (activity == null) return;
+        enforceLandscape(activity);
+        android.util.DisplayMetrics appDm = activity.getApplication().getResources().getDisplayMetrics();
+        android.util.DisplayMetrics dm = activity.getResources().getDisplayMetrics();
+        if (sSysDensity <= 0f) {
+            sSysDensity = appDm.density;
+            sSysScaledDensity = appDm.scaledDensity;
+            sSysDensityDpi = appDm.densityDpi;
+        }
+        int longSide = Math.max(dm.widthPixels, dm.heightPixels);
+        int shortSide = Math.min(dm.widthPixels, dm.heightPixels);
+        float target = Math.min(longSide / 960f, shortSide / 540f);
+        float useDensity;
+        float useScaled;
+        int useDpi;
+        if (target > 0.4f && target < sSysDensity - 0.01f) {
+            float fontScale = sSysDensity > 0f ? (sSysScaledDensity / sSysDensity) : 1f;
+            fontScale = Math.max(0.85f, Math.min(1.15f, fontScale));
+            useDensity = target;
+            useScaled = target * fontScale;
+            useDpi = Math.max(120, Math.round(target * 160f));
+        } else {
+            useDensity = sSysDensity;
+            useScaled = sSysScaledDensity;
+            useDpi = sSysDensityDpi;
+        }
+        dm.density = useDensity;
+        dm.scaledDensity = useScaled;
+        dm.densityDpi = useDpi;
+        appDm.density = useDensity;
+        appDm.scaledDensity = useScaled;
+        appDm.densityDpi = useDpi;
+    }
+
     // ------------------------------------------------------------ 形状
 
     public static GradientDrawable round(Context c, int color, float radiusDp) {

@@ -58,6 +58,7 @@ public final class RestActivity extends Activity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        ink.pengfei.lvguo.ui.Ui.adaptScreen(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
         getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF080B14));
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
@@ -119,6 +120,7 @@ public final class RestActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        ink.pengfei.lvguo.ui.Ui.enforceLandscape(this);
         ui.removeCallbacks(check);
         ui.post(check);
     }
