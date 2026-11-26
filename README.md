@@ -6,14 +6,15 @@
 
 **用遥控器大屏看剧，用手机浏览器随手选剧，用桌面网页端沉浸追剧。**
 
-红果短剧第三方 **Android 电视 / 投影仪客户端** 与 **桌面网页版**
+红果短剧第三方 **Android 电视 / 投影仪客户端**、**PC 桌面客户端** 与 **桌面网页版**
 
-[![Version](https://img.shields.io/badge/version-2.0.11-2ea44f?style=flat-square)](https://github.com/Amor5207/lvguo-tv/releases/latest)
+[![Version](https://img.shields.io/badge/version-2.1.0-2ea44f?style=flat-square)](https://github.com/Amor5207/lvguo-tv/releases/latest)
 [![Android](https://img.shields.io/badge/Android-6.0%2B-3ddc84?style=flat-square&logo=android&logoColor=white)](#系统要求与安装)
+[![Desktop](https://img.shields.io/badge/Desktop-Windows%20(Primary)%20%7C%20macOS%20%7C%20Linux-0a84ff?style=flat-square)](#系统要求与安装)
 [![Arch](https://img.shields.io/badge/arch-ARMv7%20%7C%20ARM64%20%7C%20x86%20%7C%20x86__64-16a34a?style=flat-square)](https://github.com/Amor5207/lvguo-tv/releases/latest)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
 
-[官网体验](https://lvguo.pengfei.ink) · [下载 2.0.11](https://github.com/Amor5207/lvguo-tv/releases/latest) · [界面预览](#界面预览) · [功能特性](#功能特性) · [构建项目](#构建项目) · [致谢](#致谢)
+[官网体验](https://lvguo.pengfei.ink) · [下载 2.1.0](https://github.com/Amor5207/lvguo-tv/releases/latest) · [界面预览](#界面预览) · [功能特性](#功能特性) · [构建项目](#构建项目) · [致谢](#致谢)
 
 <br>
 
@@ -23,10 +24,11 @@
 
 ## 简介
 
-**绿果TV 2.0** 是面向智能电视、投影仪与桌面浏览器的红果短剧第三方客户端：
+**绿果TV 2.1** 是面向智能电视、投影仪、桌面端与浏览器的红果短剧第三方客户端：
 
-- **官网**：[https://lvguo.pengfei.ink](https://lvguo.pengfei.ink)
+- **官网快速体验**：[https://lvguo.pengfei.ink](https://lvguo.pengfei.ink)（在线网页端仅用于快速体验，受公共资源与网络波动影响可能不够稳定；如体验符合预期，推荐下载下方 **Android TV 端** 或 **PC 桌面端** 长期稳定使用）
 - **Android 电视 / 投影仪端**：面向 1920×1080 大屏设计的原生 Android 应用，纯 Java 实现，单个安装包通用 **32 位 / 64 位 ARM 与 x86** 架构，内置 Media3 硬件解码与局域网手机遥控服务。
+- **PC 桌面客户端（绿果PC）**：基于 **Flutter + Rust (`lvguo_core`) + libmpv** 的本地独立桌面端，内置本地解析、CENC 流式解密、多线程离线下载、GPU 着色器超分增强与热更新能力。受限于本地开发与测试环境，目前**主要维护 Windows 版本**；macOS 与 Linux 安装包由 GitHub Actions 自动构建提供，暂不在日常维护与测试范围内。
 - **桌面网页端**：基于 Go 标准库与原生前端构建的单二进制 Web 服务，提供 **x86_64（64 位）、x86（32 位）、ARM64（64 位）、ARMv7（32 位）** 构建产物，无需前端打包工具即可独立部署。
 
 ---
@@ -133,7 +135,14 @@
 - **账号登录与实时同步**：需使用红果 App 扫码或手机号验证码登录使用，收藏、历史与播放进度与手机红果 App 实时同步；退出或会话失效时自动回到登录页。
 - **应用内更新与动态播放模块**：支持检查应用更新，并支持对已签名的播放签名模块进行安全更新。
 
-### 桌面网页端
+### PC 桌面客户端（绿果PC，主维护 Windows）
+
+- **本地独立内核**：Rust 独立完成请求签名、剧集解析与 CENC 本地流式解密，无需外部后端服务，全部策略与算法模块支持热更新与一键回滚。
+- **独立多窗播放器与画质增强**：基于 libmpv 硬件解码，支持主窗浏览与独立播放窗口解耦、实时评论弹幕、多倍速/选季选集，以及 **CAS 锐化** 与 **双 Pass FSR 边缘重建超分** GPU 着色器增强。
+- **多线程离线下载**：支持剧集批量缓存、Range 分片并发下载、断点续传、限速控制与离线弹幕缓存。
+- **应用内更新**：支持版本检测、安装包下载与安装引导，并支持播放模块安全更新。
+
+### 桌面网页端（快速体验版）
 
 - **桌面影院式交互**：悬浮导航栏与卡片流布局，支持浅色 / 深色 / 跟随系统主题、骨架屏占位、图片懒加载与悬停预取。
 - **桌面播放器**：居中影院视图，右侧停靠选集与评论面板，支持弹幕、倍速、清晰度切换、自动连播以及键盘快捷键（空格、`←`/`→`、`↑`/`↓`、`N`/`P`/`F`/`M`/`D`/`T`）。
@@ -146,10 +155,10 @@
 
 | 项目 | 数值 |
 | --- | --- |
-| 当前版本 | `2.0.11` |
-| 内部版本号 | `2011` |
+| 当前版本 | `2.1.0` |
+| 内部版本号 | `2100` |
 | Android 包名 | `ink.pengfei.lvguo` |
-| 官网 | [https://lvguo.pengfei.ink](https://lvguo.pengfei.ink) |
+| 官网（快速体验） | [https://lvguo.pengfei.ink](https://lvguo.pengfei.ink) |
 
 ---
 
@@ -164,9 +173,16 @@
 | 解码能力 | 需设备支持 H.265（HEVC）硬件解码 |
 | 架构兼容 | 纯 Java 实现，32 位 / 64 位 ARM 与 x86 通用 |
 
-1. 从 [Releases](https://github.com/Amor5207/lvguo-tv/releases/latest) 下载 `LvguoTV-2.0.11.apk`。
+1. 从 [Releases](https://github.com/Amor5207/lvguo-tv/releases/latest) 下载 `LvguoTV-2.1.0.apk`。
 2. 安装到电视或投影仪后，通过红果 App 扫码或手机号验证码登录即可开始浏览与播放。
 3. 使用手机遥控时需确保手机与电视处于同一局域网（仅建议在可信局域网内使用）。
+
+### PC 桌面客户端（绿果PC）
+
+> **维护范围说明**：受限于本地开发与测试环境，PC 端**主要维护 Windows 版本**；macOS 与 Linux 构建产物由自动化流程构建提供，暂不在日常维护与实机测试范围内。
+
+- 从 [Releases](https://github.com/Amor5207/lvguo-tv/releases/latest) 下载对应平台安装包（Windows 推荐 `LvguoPC-Setup-2.1.0-win-x64.exe`，Windows ARM64 设备可直接运行 x64 安装包）。
+- 桌面端安装包由自动化构建流程在版本发布后编译并挂载，通常耗时约 **5–8 分钟**；若新版本刚发布时暂未看到对应安装包，请稍候刷新页面即可。
 
 ### 桌面网页端（自托管部署）
 
@@ -199,18 +215,22 @@ gradle assembleDebug
 或使用独立 SDK 构建脚本：
 
 ```shell
-LVGUO_VERSION_NAME=2.0.11 LVGUO_VERSION_CODE=2011 python3 build_local.py
+LVGUO_VERSION_NAME=2.1.0 LVGUO_VERSION_CODE=2100 python3 build_local.py
 ```
 
 ### 网页端（32 位 / 64 位交叉编译）
 
 ```shell
 cd web
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=2.0.11" -o dist/lvguo-linux-amd64 ./cmd/lvguo
-CGO_ENABLED=0 GOOS=linux GOARCH=386   go build -trimpath -ldflags="-s -w -X main.version=2.0.11" -o dist/lvguo-linux-386   ./cmd/lvguo
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=2.0.11" -o dist/lvguo-linux-arm64 ./cmd/lvguo
-CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w -X main.version=2.0.11" -o dist/lvguo-linux-armv7 ./cmd/lvguo
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=2.1.0" -o dist/lvguo-linux-amd64 ./cmd/lvguo
+CGO_ENABLED=0 GOOS=linux GOARCH=386   go build -trimpath -ldflags="-s -w -X main.version=2.1.0" -o dist/lvguo-linux-386   ./cmd/lvguo
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=2.1.0" -o dist/lvguo-linux-arm64 ./cmd/lvguo
+CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w -X main.version=2.1.0" -o dist/lvguo-linux-armv7 ./cmd/lvguo
 ```
+
+### PC 桌面客户端
+
+详见 [desktop/README.md](desktop/README.md) 与自动化工作流 [.github/workflows/desktop-release.yml](.github/workflows/desktop-release.yml)。
 
 ---
 
@@ -225,6 +245,8 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w -
 | `src/ink/pengfei/lvguo/care/` | 休息时段、定时暂停与整点提醒 |
 | `src/ink/pengfei/lvguo/update/` | 应用内自更新下载、校验与安装 |
 | `tv-playback-module/` | 可独立更新签名的播放请求模块源码 |
+| `desktop/` | 基于 Flutter + Rust + libmpv 的 PC 桌面客户端源码（主维护 Windows） |
+| `.github/workflows/desktop-release.yml` | PC 桌面端多平台自动编译与 Release 附件发布工作流 |
 | `web/` | 基于 Go 与原生前端的网页版完整源码 |
 
 ---
