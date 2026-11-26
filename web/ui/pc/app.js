@@ -963,8 +963,8 @@
         if (!box) { box = document.createElement('section'); box.className = 'dseasons'; sec.parentNode.insertBefore(box, sec); }
         box.innerHTML = '<div class="sh2"><h2>选择季</h2><span>共 ' + list.length + ' 季</span></div><div class="seasrow">' +
           list.map(function (se) {
-            var soon = !se.episodes;
-            return '<button class="seachip' + (se.current ? ' on' : '') + (soon ? ' soon' : '') + '" data-sid="' + se.id + '">' +
+            var cur = String(se.id) === String(id) || (d && d.id && String(se.id) === String(d.id)), soon = !se.episodes;
+            return '<button class="seachip' + (cur ? ' on' : '') + (soon ? ' soon' : '') + '" data-sid="' + se.id + '">' +
               '<b>第 ' + se.number + ' 季</b>' + (soon ? '<i>待上线</i>' : '') + '</button>';
           }).join('') + '</div>';
         var on = $('.seachip.on', box), row = $('.seasrow', box); if (on && row.scrollWidth > row.clientWidth) row.scrollLeft = on.offsetLeft - (row.clientWidth - on.offsetWidth) / 2;
