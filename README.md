@@ -267,3 +267,13 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags="-s -w -
 ## 开源协议
 
 本项目采用 [GNU General Public License v3.0](LICENSE) 开源协议。
+
+## Star History
+
+<a href="https://www.star-history.com/#Amor5207/lvguo-tv&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Amor5207/lvguo-tv&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Amor5207/lvguo-tv&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Amor5207/lvguo-tv&type=Date" />
+ </picture>
+</a>
